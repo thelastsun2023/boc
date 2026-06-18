@@ -44,11 +44,18 @@ COPY --from=builder /build/bin/server /app/server
 # Platform.script(/app/server).parent.parent.parent = /, then resolve build/web/ = /build/web
 COPY --from=flutter_builder /flutter/build/web /build/web
 
-# Create UPLOAD directory for image storage
+# Seed images: bundled into image so they are restored into the Volume on first boot
+COPY UPLOAD/IMAGES /app/UPLOAD_SEED/IMAGES
+
+# Copy entrypoint script
+COPY entrypoint.sh /app/entrypoint.sh
+RUN chmod +x /app/entrypoint.sh
+
+# Create UPLOAD directory for image storage (may be replaced by a Volume mount)
 RUN mkdir -p /app/UPLOAD/IMAGES
 
 # Expose port
 EXPOSE 8081
 
-# Run the server
-ENTRYPOINT ["/app/server"]
+# Run via entrypoint so seed images are copied to Volume before server starts
+ENTRYPOINT ["/app/entrypoint.sh"]
