@@ -1,23 +1,23 @@
 import 'package:flutter/foundation.dart';
 
-// Configuration: Edit this if you need to change the backend server URL
-// For web: typically the backend runs on the same host (e.g., localhost:8081 or yourdomain.com:8081)
-// For mobile: use your development machine's IP and port
-const String BACKEND_HOST = 'localhost';
-const int BACKEND_PORT = 8081;
-
-// For production, you can override this:
-// const String BACKEND_HOST = 'your-production-domain.com';
-// const int BACKEND_PORT = 80; // or 443 for HTTPS
+// Local development fallback (mobile only).
+// Web production uses same-origin (no host:port needed).
+const String _devBackendHost = 'localhost';
+const int _devBackendPort = 8081;
 
 String getBaseUrl() {
   if (kIsWeb) {
-    // For web: use the same host as the frontend, with configured port
+    // In production the Flutter web build is served by the same Dart backend,
+    // so all API calls are same-origin — no host or port needed.
+    // In local development (localhost) we still append the port.
     final uri = Uri.base;
-    final host = uri.host.isNotEmpty ? uri.host : BACKEND_HOST;
-    final scheme = uri.scheme.isNotEmpty ? uri.scheme : 'http';
-    return '$scheme://$host:$BACKEND_PORT';
+    final host = uri.host;
+    if (host == 'localhost' || host == '127.0.0.1') {
+      return 'http://$host:$_devBackendPort';
+    }
+    // Production: same origin, no port suffix.
+    return '${uri.scheme}://$host';
   }
-  // For mobile apps: use configured backend host and port
-  return 'http://$BACKEND_HOST:$BACKEND_PORT';
+  // Mobile: point at the development machine.
+  return 'http://$_devBackendHost:$_devBackendPort';
 }
