@@ -1673,7 +1673,9 @@ String? _imageUrlFromPath(String? imagePath) {
     return null;
   }
   final fileName = imagePath.replaceAll('\\', '/').split('/').last;
-  return 'http://127.0.0.1:8081/uploads/images/$fileName';
+  // Return a root-relative path so both local dev and production work
+  // without hardcoding a hostname/port.
+  return '/uploads/images/$fileName';
 }
 
 Future<void> _deleteUploadedImage(String? imagePath) async {

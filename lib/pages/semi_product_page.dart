@@ -185,17 +185,20 @@ class _SemiProductPageState extends State<SemiProductPage> {
   }
 
   String _displayImageUrl(String imageUrl) {
-    final sourceUri = Uri.tryParse(imageUrl);
-    final baseUri = Uri.tryParse(_systemService.baseUrl);
-    if (sourceUri == null || baseUri == null) {
-      return imageUrl;
+    // Relative path (e.g. /uploads/images/xxx.jpg) → prepend baseUrl
+    if (imageUrl.startsWith('/uploads/')) {
+      return '${_systemService.baseUrl}$imageUrl';
     }
-    if (sourceUri.host == '127.0.0.1' || sourceUri.host == 'localhost') {
-      return sourceUri
+    // Legacy absolute localhost URL → replace host with current baseUrl
+    if (imageUrl.startsWith('http://127.0.0.1') ||
+        imageUrl.startsWith('http://localhost')) {
+      final uri = Uri.parse(imageUrl);
+      final base = Uri.parse(_systemService.baseUrl);
+      return uri
           .replace(
-            scheme: baseUri.scheme,
-            host: baseUri.host,
-            port: baseUri.hasPort ? baseUri.port : null,
+            scheme: base.scheme,
+            host: base.host,
+            port: base.hasPort ? base.port : 0,
           )
           .toString();
     }

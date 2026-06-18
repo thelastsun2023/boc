@@ -83,8 +83,22 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   }
 
   String _displayImageUrl(String imageUrl) {
-    if (imageUrl.startsWith('http://127.0.0.1')) {
-      return imageUrl.replaceFirst('http://127.0.0.1', 'http://localhost');
+    // Relative path (e.g. /uploads/images/xxx.jpg) → prepend baseUrl
+    if (imageUrl.startsWith('/uploads/')) {
+      return '${_systemService.baseUrl}$imageUrl';
+    }
+    // Legacy absolute localhost URL → replace host with current baseUrl
+    if (imageUrl.startsWith('http://127.0.0.1') ||
+        imageUrl.startsWith('http://localhost')) {
+      final uri = Uri.parse(imageUrl);
+      final base = Uri.parse(_systemService.baseUrl);
+      return uri
+          .replace(
+            scheme: base.scheme,
+            host: base.host,
+            port: base.hasPort ? base.port : 0,
+          )
+          .toString();
     }
     return imageUrl;
   }
@@ -1288,7 +1302,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   (material) => material['code'] == selectedRawMaterialCode,
                 )['nameEN']
                 as String?,
-            selectedRawMaterialCode!,
+            selectedRawMaterialCode,
           );
 
     String? selectedToolCode = _kitchenTools

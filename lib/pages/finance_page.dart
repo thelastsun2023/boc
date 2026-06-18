@@ -171,8 +171,22 @@ class _FinancePageState extends State<FinancePage> {
   }
 
   String _displayImageUrl(String imageUrl) {
-    if (imageUrl.startsWith('http://127.0.0.1')) {
-      return imageUrl.replaceFirst('http://127.0.0.1', 'http://localhost');
+    // Relative path (e.g. /uploads/images/xxx.jpg) → prepend baseUrl
+    if (imageUrl.startsWith('/uploads/')) {
+      return '${_service.baseUrl}$imageUrl';
+    }
+    // Legacy absolute localhost URL → replace host with current baseUrl
+    if (imageUrl.startsWith('http://127.0.0.1') ||
+        imageUrl.startsWith('http://localhost')) {
+      final uri = Uri.parse(imageUrl);
+      final base = Uri.parse(_service.baseUrl);
+      return uri
+          .replace(
+            scheme: base.scheme,
+            host: base.host,
+            port: base.hasPort ? base.port : 0,
+          )
+          .toString();
     }
     return imageUrl;
   }
@@ -1046,7 +1060,7 @@ class _FinancePageState extends State<FinancePage> {
                   try {
                     final success = isEdit
                         ? await _service.updateFinanceRecord(
-                            item!['id'] as int,
+                            item['id'] as int,
                             selectedType,
                             selectedDate,
                             imageBytes,
