@@ -1,0 +1,1 @@
+import 'dart:io'; import 'dart:convert'; Future<void> main() async { try { var uri = Uri.parse('http://127.0.0.1:8081/api/test'); var client = HttpClient(); var request = await client.getUrl(uri); var response = await request.close(); var body = await response.transform(utf8.decoder).join(); print('status='); print('body='); client.close(); } catch (e) { print('error='); } }

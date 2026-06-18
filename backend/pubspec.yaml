@@ -1,0 +1,17 @@
+name: boc_backend
+description: BOC backend API server with PostgreSQL authentication.
+version: 1.0.0
+
+environment:
+  sdk: ^3.0.0
+
+dependencies:
+  shelf: ^1.4.1
+  shelf_router: ^1.1.4
+  shelf_static: ^1.1.3
+  postgres: ^3.0.0
+  crypto: ^3.0.2
+  dart_jsonwebtoken: ^2.12.0
+
+dev_dependencies:
+  lints: ^3.0.0

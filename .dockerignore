@@ -1,0 +1,34 @@
+# Git
+.git
+.gitignore
+.github
+
+# Build artifacts
+build/
+.dart_tool/
+.pub-cache/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*.iml
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Frontend (we don't need it for backend container)
+web/
+lib/
+pubspec.yaml
+flutter_run.err
+
+# Test files
+test/
+*.test
+
+# Documentation
+*.md
+README.md
