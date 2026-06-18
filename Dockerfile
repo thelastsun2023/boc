@@ -40,8 +40,9 @@ WORKDIR /app
 # Copy compiled binary from builder
 COPY --from=builder /build/bin/server /app/server
 
-# Copy Flutter web build
-COPY --from=flutter_builder /flutter/build/web /app/build/web
+# Copy Flutter web build to the path the server resolves:
+# Platform.script(/app/server).parent.parent.parent = /, then resolve build/web/ = /build/web
+COPY --from=flutter_builder /flutter/build/web /build/web
 
 # Create UPLOAD directory for image storage
 RUN mkdir -p /app/UPLOAD/IMAGES
