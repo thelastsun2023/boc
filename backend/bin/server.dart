@@ -8,8 +8,9 @@ import 'package:shelf_static/shelf_static.dart';
 import 'package:postgres/postgres.dart';
 import 'package:crypto/crypto.dart';
 
-// PostgreSQL connection
-late Connection _conn;
+// PostgreSQL connection pool. A pool discards broken connections and opens a
+// fresh one after Railway restarts or replaces the Postgres service.
+late Pool<void> _conn;
 final Directory _uploadImagesDir = Directory.fromUri(
   File.fromUri(Platform.script)
       .parent
@@ -159,15 +160,20 @@ Future<void> initDb() async {
     securityContext.setTrustedCertificates(caFile.path);
   }
 
-  _conn = await Connection.open(
-    Endpoint(
-      host: dbHost,
-      port: dbPort,
-      database: dbName,
-      username: dbUsername,
-      password: dbPassword,
-    ),
-    settings: ConnectionSettings(
+  _conn = Pool<void>.withEndpoints(
+    [
+      Endpoint(
+        host: dbHost,
+        port: dbPort,
+        database: dbName,
+        username: dbUsername,
+        password: dbPassword,
+      )
+    ],
+    settings: PoolSettings(
+      maxConnectionCount: 5,
+      connectTimeout: const Duration(seconds: 10),
+      queryTimeout: const Duration(seconds: 30),
       sslMode: sslMode,
       securityContext: securityContext,
     ),
