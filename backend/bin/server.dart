@@ -528,6 +528,13 @@ Future<void> initDb() async {
   await _conn.execute(
     'ALTER TABLE stock_orders ADD COLUMN IF NOT EXISTS store_code VARCHAR(50)',
   );
+  await _conn.execute('''
+    SELECT setval(
+      pg_get_serial_sequence('stock_orders', 'id'),
+      COALESCE((SELECT MAX(id) FROM stock_orders), 1),
+      EXISTS (SELECT 1 FROM stock_orders)
+    )
+  ''');
 
   // Create kitchen_tools table
   await _conn.execute('''
