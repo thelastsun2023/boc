@@ -417,6 +417,7 @@ Future<void> initDb() async {
       type VARCHAR(20) NOT NULL,
       record_date DATE NOT NULL,
       amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+      cash_amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
       note TEXT,
       image_path VARCHAR(255),
       supplier_code VARCHAR(50),
@@ -433,6 +434,9 @@ Future<void> initDb() async {
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS amount NUMERIC(12, 2) NOT NULL DEFAULT 0',
+  );
+  await _conn.execute(
+    'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS cash_amount NUMERIC(12, 2) NOT NULL DEFAULT 0',
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS note TEXT',
@@ -3546,6 +3550,7 @@ Future<Response> _addFinanceRecord(Request request) async {
     final type = json['type'] as String?;
     final recordDate = json['recordDate'] as String?;
     final amount = json['amount'] as num?;
+    final cashAmount = json['cashAmount'] as num?;
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
     final supplierCode = _normalizedOptionalString(json['supplierCode']);
@@ -3557,6 +3562,15 @@ Future<Response> _addFinanceRecord(Request request) async {
     if (type == null || recordDate == null) {
       return Response.badRequest(
         body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    if ((cashAmount ?? 0) < 0 || (cashAmount ?? 0) > (amount ?? 0)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '现金金额必须在 0 和总金额之间'}),
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
@@ -3582,11 +3596,12 @@ Future<Response> _addFinanceRecord(Request request) async {
       );
     }
     await _conn.execute(
-      'INSERT INTO finance_records (type, record_date, amount, note, image_path, supplier_code, payment_method, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8)',
+      'INSERT INTO finance_records (type, record_date, amount, cash_amount, note, image_path, supplier_code, payment_method, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9)',
       parameters: [
         type,
         DateTime.parse(recordDate),
         amount ?? 0,
+        cashAmount ?? 0,
         note ?? '',
         imagePath ?? '',
         type == '支出' ? supplierCode : null,
@@ -3629,8 +3644,8 @@ Future<Response> _getFinanceRecords(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code ORDER BY fr.record_date DESC, fr.id DESC'
-          : 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code WHERE LOWER(COALESCE(fr.store_code, \'\')) = LOWER(\$1) ORDER BY fr.record_date DESC, fr.id DESC',
+          ? 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method, fr.cash_amount FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code ORDER BY fr.record_date DESC, fr.id DESC'
+          : 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method, fr.cash_amount FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code WHERE LOWER(COALESCE(fr.store_code, \'\')) = LOWER(\$1) ORDER BY fr.record_date DESC, fr.id DESC',
       parameters: scope.isAdmin ? const [] : [scope.storeCode ?? ''],
     );
     final records = result
@@ -3645,6 +3660,7 @@ Future<Response> _getFinanceRecords(Request request) async {
               'supplierCode': row[7],
               'supplierName': row[8],
               'paymentMethod': row[9],
+              'cashAmount': row[10],
             })
         .toList();
 
@@ -3684,6 +3700,7 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
     final type = json['type'] as String?;
     final recordDate = json['recordDate'] as String?;
     final amount = json['amount'] as num?;
+    final cashAmount = json['cashAmount'] as num?;
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
     final supplierCode = _normalizedOptionalString(json['supplierCode']);
@@ -3695,6 +3712,15 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
     if (type == null || recordDate == null) {
       return Response.badRequest(
         body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    if ((cashAmount ?? 0) < 0 || (cashAmount ?? 0) > (amount ?? 0)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '现金金额必须在 0 和总金额之间'}),
         headers: {
           'Content-Type': 'application/json',
           'Access-Control-Allow-Origin': '*'
@@ -3748,19 +3774,20 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
       type,
       DateTime.parse(recordDate),
       amount ?? 0,
+      cashAmount ?? 0,
       note ?? '',
       storeCode,
       type == '支出' ? supplierCode : null,
       type == '支出' ? paymentMethod : null,
     ];
     var sql =
-        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, note = \$4, store_code = \$5, supplier_code = \$6, payment_method = \$7';
+        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, cash_amount = \$4, note = \$5, store_code = \$6, supplier_code = \$7, payment_method = \$8';
     if (imagePath != null && imagePath.isNotEmpty) {
-      sql += ', image_path = \$8 WHERE id = \$9';
+      sql += ', image_path = \$9 WHERE id = \$10';
       payload.add(imagePath);
       payload.add(int.parse(id));
     } else {
-      sql += ' WHERE id = \$8';
+      sql += ' WHERE id = \$9';
       payload.add(int.parse(id));
     }
 

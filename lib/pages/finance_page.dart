@@ -483,22 +483,33 @@ class _FinancePageState extends State<FinancePage> {
   Map<String, double> _calculateSummary(List<Map<String, dynamic>> records) {
     double income = 0;
     double expense = 0;
+    double cashIncome = 0;
+    double cashExpense = 0;
     for (final item in records) {
       final type = item['type'] as String?;
       final amount = item['amount'];
       final value = amount is num
           ? amount.toDouble()
           : double.tryParse(amount?.toString() ?? '') ?? 0;
+      final cashAmount = item['cashAmount'];
+      final cashValue = cashAmount is num
+          ? cashAmount.toDouble()
+          : double.tryParse(cashAmount?.toString() ?? '') ?? 0;
       if (type == '收入') {
         income += value;
+        cashIncome += cashValue;
       } else if (type == '支出') {
         expense += value;
+        cashExpense += cashValue;
       }
     }
     return {
       'income': income,
       'expense': expense,
       'remaining': income - expense,
+      'cashIncome': cashIncome,
+      'cashExpense': cashExpense,
+      'cashRemaining': cashIncome - cashExpense,
     };
   }
 
@@ -586,6 +597,18 @@ class _FinancePageState extends State<FinancePage> {
         <span>剩余金额</span>
         <strong>￥${(summary['remaining'] ?? 0).toStringAsFixed(2)}</strong>
       </div>
+      <div class="summary-card income">
+        <span>现金收入</span>
+        <strong>￥${(summary['cashIncome'] ?? 0).toStringAsFixed(2)}</strong>
+      </div>
+      <div class="summary-card expense">
+        <span>现金支出</span>
+        <strong>￥${(summary['cashExpense'] ?? 0).toStringAsFixed(2)}</strong>
+      </div>
+      <div class="summary-card remaining">
+        <span>现金余额</span>
+        <strong>￥${(summary['cashRemaining'] ?? 0).toStringAsFixed(2)}</strong>
+      </div>
     </div>
   </div>
   <table>
@@ -594,6 +617,7 @@ class _FinancePageState extends State<FinancePage> {
         <th>日期</th>
         <th>供应商</th>
         <th>付款方式</th>
+        <th>现金金额</th>
         <th>备注</th>
         <th>收入</th>
         <th>支出</th>
@@ -604,7 +628,7 @@ class _FinancePageState extends State<FinancePage> {
 ''');
 
     if (filtered.isEmpty) {
-      buffer.write('<tr><td colspan="7" class="empty">当前筛选条件下没有财务记录</td></tr>');
+      buffer.write('<tr><td colspan="8" class="empty">当前筛选条件下没有财务记录</td></tr>');
     } else {
       for (final item in filtered) {
         final type = (item['type'] as String? ?? '').trim();
@@ -617,6 +641,7 @@ class _FinancePageState extends State<FinancePage> {
         final note = (item['note'] as String? ?? '').trim();
         final supplierName = (item['supplierName'] as String? ?? '').trim();
         final paymentMethod = (item['paymentMethod'] as String? ?? '').trim();
+        final cashAmount = _formatAmount(item['cashAmount']);
         final dateText = item['recordDate'] as String? ?? '-';
 
         buffer.write('<tr>');
@@ -627,6 +652,7 @@ class _FinancePageState extends State<FinancePage> {
         buffer.write(
           '<td>${_escapeHtml(paymentMethod.isEmpty ? '-' : paymentMethod)}</td>',
         );
+        buffer.write('<td>￥${_escapeHtml(cashAmount)}</td>');
         buffer.write('<td>${_escapeHtml(note.isEmpty ? '-' : note)}</td>');
         buffer.write(
           '<td class="income-cell">${income == 0 ? '' : '￥${income.toStringAsFixed(2)}'}</td>',
@@ -904,10 +930,15 @@ class _FinancePageState extends State<FinancePage> {
       selectedPaymentMethod = null;
     }
     final dateController = TextEditingController(
-      text: item != null ? item['recordDate'] as String? ?? '' : '',
+      text: item != null
+          ? item['recordDate'] as String? ?? ''
+          : _formatFriendlyDate(DateTime.now()),
     );
     final amountController = TextEditingController(
       text: item != null ? (item['amount']?.toString() ?? '') : '',
+    );
+    final cashAmountController = TextEditingController(
+      text: item != null ? (item['cashAmount']?.toString() ?? '0') : '0',
     );
     final noteController = TextEditingController(
       text: item?['note'] as String? ?? '',
@@ -1022,6 +1053,17 @@ class _FinancePageState extends State<FinancePage> {
                     ),
                     const SizedBox(height: 12),
                     TextField(
+                      controller: cashAmountController,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      decoration: const InputDecoration(
+                        labelText: '现金金额',
+                        helperText: '该笔记录中实际收付的现金部分',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+                    TextField(
                       controller: dateController,
                       readOnly: true,
                       decoration: const InputDecoration(labelText: '日期'),
@@ -1052,70 +1094,67 @@ class _FinancePageState extends State<FinancePage> {
                       controller: noteController,
                       decoration: const InputDecoration(labelText: '备注'),
                     ),
-                    if (selectedType == '支出') ...[
-                      const SizedBox(height: 16),
-                      FilledButton.icon(
-                        icon: const Icon(Icons.image),
-                        label: Text(
-                          imageBytes != null || (imageUrl?.isNotEmpty == true)
-                              ? '更换凭证'
-                              : '上传凭证（可稍后补传）',
-                        ),
-                        onPressed: () async {
-                          final picked = await _pickAndCropPhoto();
-                          if (picked != null) {
-                            setDialogState(() {
-                              imageBytes = picked.bytes;
-                              imageUrl = null;
-                            });
-                          }
-                        },
+                    const SizedBox(height: 16),
+                    FilledButton.icon(
+                      icon: const Icon(Icons.image),
+                      label: Text(
+                        imageBytes != null || (imageUrl?.isNotEmpty == true)
+                            ? '更换凭证'
+                            : '上传凭证（可稍后补传）',
                       ),
-                      const SizedBox(height: 12),
-                      if (imageBytes != null)
-                        GestureDetector(
-                          onTap: () =>
-                              _showZoomableImage(imageBytes: imageBytes),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.memory(
-                              imageBytes!,
-                              width: 180,
-                              height: 180,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        )
-                      else if (imageUrl?.isNotEmpty == true)
-                        GestureDetector(
-                          onTap: () => _showZoomableImage(imageUrl: imageUrl),
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(8),
-                            child: Image.network(
-                              _displayImageUrl(imageUrl!),
-                              width: 180,
-                              height: 180,
-                              fit: BoxFit.cover,
-                            ),
-                          ),
-                        )
-                      else
-                        Container(
-                          width: 180,
-                          height: 180,
-                          decoration: BoxDecoration(
-                            color: Colors.grey[200],
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                          child: const Center(
-                            child: Icon(
-                              Icons.photo,
-                              size: 48,
-                              color: Colors.grey,
-                            ),
+                      onPressed: () async {
+                        final picked = await _pickAndCropPhoto();
+                        if (picked != null) {
+                          setDialogState(() {
+                            imageBytes = picked.bytes;
+                            imageUrl = null;
+                          });
+                        }
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    if (imageBytes != null)
+                      GestureDetector(
+                        onTap: () => _showZoomableImage(imageBytes: imageBytes),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.memory(
+                            imageBytes!,
+                            width: 180,
+                            height: 180,
+                            fit: BoxFit.cover,
                           ),
                         ),
-                    ],
+                      )
+                    else if (imageUrl?.isNotEmpty == true)
+                      GestureDetector(
+                        onTap: () => _showZoomableImage(imageUrl: imageUrl),
+                        child: ClipRRect(
+                          borderRadius: BorderRadius.circular(8),
+                          child: Image.network(
+                            _displayImageUrl(imageUrl!),
+                            width: 180,
+                            height: 180,
+                            fit: BoxFit.cover,
+                          ),
+                        ),
+                      )
+                    else
+                      Container(
+                        width: 180,
+                        height: 180,
+                        decoration: BoxDecoration(
+                          color: Colors.grey[200],
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.photo,
+                            size: 48,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ),
                   ],
                 ),
               ),
@@ -1129,6 +1168,8 @@ class _FinancePageState extends State<FinancePage> {
                 onPressed: () async {
                   final amount =
                       double.tryParse(amountController.text.trim()) ?? 0;
+                  final cashAmount =
+                      double.tryParse(cashAmountController.text.trim()) ?? 0;
                   final selectedDate = dateController.text.trim();
                   if (selectedDate.isEmpty) {
                     if (mounted) {
@@ -1146,6 +1187,10 @@ class _FinancePageState extends State<FinancePage> {
                     _showMessage('请选择付款方式');
                     return;
                   }
+                  if (cashAmount < 0 || cashAmount > amount) {
+                    _showMessage('现金金额必须在 0 和总金额之间');
+                    return;
+                  }
                   try {
                     final success = isEdit
                         ? await _service.updateFinanceRecord(
@@ -1154,6 +1199,7 @@ class _FinancePageState extends State<FinancePage> {
                             selectedDate,
                             imageBytes,
                             amount,
+                            cashAmount,
                             noteController.text.trim(),
                             selectedSupplierCode,
                             selectedPaymentMethod,
@@ -1163,6 +1209,7 @@ class _FinancePageState extends State<FinancePage> {
                             selectedDate,
                             imageBytes,
                             amount,
+                            cashAmount,
                             noteController.text.trim(),
                             selectedSupplierCode,
                             selectedPaymentMethod,
@@ -1286,6 +1333,21 @@ class _FinancePageState extends State<FinancePage> {
                                             context,
                                             '剩余金额',
                                             summary['remaining'] ?? 0,
+                                          ),
+                                          _buildSummaryTile(
+                                            context,
+                                            '现金收入',
+                                            summary['cashIncome'] ?? 0,
+                                          ),
+                                          _buildSummaryTile(
+                                            context,
+                                            '现金支出',
+                                            summary['cashExpense'] ?? 0,
+                                          ),
+                                          _buildSummaryTile(
+                                            context,
+                                            '现金余额',
+                                            summary['cashRemaining'] ?? 0,
                                           ),
                                         ],
                                       ),
@@ -1439,7 +1501,7 @@ class _FinancePageState extends State<FinancePage> {
                                             ),
                                           ),
                                           title: Text(
-                                            '${item['type']}  ￥${_formatAmount(item['amount'])}',
+                                            '${item['type']}  ￥${_formatAmount(item['amount'])}  · 现金 ￥${_formatAmount(item['cashAmount'])}',
                                           ),
                                           subtitle: Text(
                                             '${item['recordDate']}${(item['supplierName'] as String? ?? '').trim().isNotEmpty ? ' · ${(item['supplierName'] as String).trim()}' : ''}${(item['paymentMethod'] as String? ?? '').trim().isNotEmpty ? ' · ${(item['paymentMethod'] as String).trim()}' : ''} · ${item['note'] ?? ''}',
