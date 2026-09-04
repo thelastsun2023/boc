@@ -411,6 +411,7 @@ Future<void> initDb() async {
       amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
       note TEXT,
       image_path VARCHAR(255),
+      supplier_code VARCHAR(50),
       store_code VARCHAR(50),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -429,6 +430,9 @@ Future<void> initDb() async {
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS image_path VARCHAR(255)',
+  );
+  await _conn.execute(
+    'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS supplier_code VARCHAR(50)',
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS store_code VARCHAR(50)',
@@ -3532,6 +3536,7 @@ Future<Response> _addFinanceRecord(Request request) async {
     final amount = json['amount'] as num?;
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
+    final supplierCode = _normalizedOptionalString(json['supplierCode']);
     final storeCode = scope.isAdmin
         ? _normalizedStoreCode(json['storeCode'])
         : scope.storeCode;
@@ -3545,15 +3550,24 @@ Future<Response> _addFinanceRecord(Request request) async {
         },
       );
     }
-
+    if (type == '支出' && supplierCode == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '支出记录必须选择供应商'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
     await _conn.execute(
-      'INSERT INTO finance_records (type, record_date, amount, note, image_path, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6)',
+      'INSERT INTO finance_records (type, record_date, amount, note, image_path, supplier_code, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7)',
       parameters: [
         type,
         DateTime.parse(recordDate),
         amount ?? 0,
         note ?? '',
         imagePath ?? '',
+        type == '支出' ? supplierCode : null,
         storeCode,
       ],
     );
@@ -3592,8 +3606,8 @@ Future<Response> _getFinanceRecords(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT id, type, TO_CHAR(record_date, \'YYYY-MM-DD\'), amount, note, image_path, store_code FROM finance_records ORDER BY record_date DESC, id DESC'
-          : 'SELECT id, type, TO_CHAR(record_date, \'YYYY-MM-DD\'), amount, note, image_path, store_code FROM finance_records WHERE LOWER(COALESCE(store_code, \'\')) = LOWER(\$1) ORDER BY record_date DESC, id DESC',
+          ? 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code ORDER BY fr.record_date DESC, fr.id DESC'
+          : 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code WHERE LOWER(COALESCE(fr.store_code, \'\')) = LOWER(\$1) ORDER BY fr.record_date DESC, fr.id DESC',
       parameters: scope.isAdmin ? const [] : [scope.storeCode ?? ''],
     );
     final records = result
@@ -3605,6 +3619,8 @@ Future<Response> _getFinanceRecords(Request request) async {
               'note': row[4],
               'imagePath': row[5],
               'storeCode': row[6],
+              'supplierCode': row[7],
+              'supplierName': row[8],
             })
         .toList();
 
@@ -3646,6 +3662,7 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
     final amount = json['amount'] as num?;
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
+    final supplierCode = _normalizedOptionalString(json['supplierCode']);
     final storeCode = scope.isAdmin
         ? _normalizedStoreCode(json['storeCode'])
         : scope.storeCode;
@@ -3684,22 +3701,31 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
         },
       );
     }
-
+    if (type == '支出' && supplierCode == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '支出记录必须选择供应商'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
     final payload = <dynamic>[
       type,
       DateTime.parse(recordDate),
       amount ?? 0,
       note ?? '',
       storeCode,
+      type == '支出' ? supplierCode : null,
     ];
     var sql =
-        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, note = \$4, store_code = \$5';
+        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, note = \$4, store_code = \$5, supplier_code = \$6';
     if (imagePath != null && imagePath.isNotEmpty) {
-      sql += ', image_path = \$6 WHERE id = \$7';
+      sql += ', image_path = \$7 WHERE id = \$8';
       payload.add(imagePath);
       payload.add(int.parse(id));
     } else {
-      sql += ' WHERE id = \$6';
+      sql += ' WHERE id = \$7';
       payload.add(int.parse(id));
     }
 

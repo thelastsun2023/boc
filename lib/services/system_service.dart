@@ -107,11 +107,9 @@ class SystemService {
 
   Future<bool> updateRawMaterialCategory(String code, String name) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put(
-      '/api/raw-material-categories/$encodedCode',
-      {'name': name},
-      'Failed to update raw material category',
-    );
+    return _put('/api/raw-material-categories/$encodedCode', {
+      'name': name,
+    }, 'Failed to update raw material category');
   }
 
   Future<bool> deleteRawMaterialCategory(String code) async {
@@ -148,11 +146,10 @@ class SystemService {
     String note,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put(
-      '/api/raw-material-locations/$encodedCode',
-      {'name': name, 'note': note},
-      'Failed to update raw material location',
-    );
+    return _put('/api/raw-material-locations/$encodedCode', {
+      'name': name,
+      'note': note,
+    }, 'Failed to update raw material location');
   }
 
   Future<bool> deleteRawMaterialLocation(String code) async {
@@ -381,11 +378,10 @@ class SystemService {
     String nameEN,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put(
-      '/api/semi-product-categories/$encodedCode',
-      {'nameCN': nameCN, 'nameEN': nameEN},
-      'Failed to update semi product category',
-    );
+    return _put('/api/semi-product-categories/$encodedCode', {
+      'nameCN': nameCN,
+      'nameEN': nameEN,
+    }, 'Failed to update semi product category');
   }
 
   Future<bool> deleteSemiProductCategory(String code) async {
@@ -446,19 +442,15 @@ class SystemService {
   ) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
-    return _put(
-      '/api/semi-product-stock-checks/$encodedId',
-      {
-        'semiProductCode': semiProductCode,
-        'regionCode': regionCode,
-        'weekdayStock': weekdayStock,
-        'weekendStock': weekendStock,
-        'holidayStock': holidayStock,
-        'actorUsername': session.username,
-        'storeCode': session.storeCode,
-      },
-      'Failed to update semi product stock check',
-    );
+    return _put('/api/semi-product-stock-checks/$encodedId', {
+      'semiProductCode': semiProductCode,
+      'regionCode': regionCode,
+      'weekdayStock': weekdayStock,
+      'weekendStock': weekendStock,
+      'holidayStock': holidayStock,
+      'actorUsername': session.username,
+      'storeCode': session.storeCode,
+    }, 'Failed to update semi product stock check');
   }
 
   Future<bool> deleteSemiProductStockCheck(int id) async {
@@ -635,6 +627,7 @@ class SystemService {
     Uint8List? imageBytes,
     double amount,
     String note,
+    String? supplierCode,
   ) async {
     final session = SessionService();
     final imagePath = await _uploadImage(imageBytes, 'finance.jpg');
@@ -644,6 +637,7 @@ class SystemService {
       'amount': amount,
       'note': note,
       'imagePath': imagePath,
+      'supplierCode': supplierCode,
       'actorUsername': session.username,
       'storeCode': session.storeCode,
     }, 'Failed to add finance record');
@@ -669,6 +663,7 @@ class SystemService {
     Uint8List? imageBytes,
     double amount,
     String note,
+    String? supplierCode,
   ) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
@@ -678,6 +673,7 @@ class SystemService {
       'recordDate': recordDate,
       'amount': amount,
       'note': note,
+      'supplierCode': supplierCode,
       'actorUsername': session.username,
       'storeCode': session.storeCode,
     };
