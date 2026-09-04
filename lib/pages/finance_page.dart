@@ -12,6 +12,14 @@ enum FinanceFilterPeriod { all, year, month, week, day }
 
 enum FinanceRecordTypeFilter { all, income, expense }
 
+const List<String> _expensePaymentMethods = [
+  '店里卡',
+  '店里支票',
+  '自己的卡',
+  '自己的现金',
+  '店里的现金',
+];
+
 class FinancePage extends StatefulWidget {
   const FinancePage({super.key});
 
@@ -585,6 +593,7 @@ class _FinancePageState extends State<FinancePage> {
       <tr>
         <th>日期</th>
         <th>供应商</th>
+        <th>付款方式</th>
         <th>备注</th>
         <th>收入</th>
         <th>支出</th>
@@ -595,7 +604,7 @@ class _FinancePageState extends State<FinancePage> {
 ''');
 
     if (filtered.isEmpty) {
-      buffer.write('<tr><td colspan="6" class="empty">当前筛选条件下没有财务记录</td></tr>');
+      buffer.write('<tr><td colspan="7" class="empty">当前筛选条件下没有财务记录</td></tr>');
     } else {
       for (final item in filtered) {
         final type = (item['type'] as String? ?? '').trim();
@@ -607,12 +616,16 @@ class _FinancePageState extends State<FinancePage> {
         runningRemaining += income - expense;
         final note = (item['note'] as String? ?? '').trim();
         final supplierName = (item['supplierName'] as String? ?? '').trim();
+        final paymentMethod = (item['paymentMethod'] as String? ?? '').trim();
         final dateText = item['recordDate'] as String? ?? '-';
 
         buffer.write('<tr>');
         buffer.write('<td>${_escapeHtml(dateText)}</td>');
         buffer.write(
           '<td>${_escapeHtml(supplierName.isEmpty ? '-' : supplierName)}</td>',
+        );
+        buffer.write(
+          '<td>${_escapeHtml(paymentMethod.isEmpty ? '-' : paymentMethod)}</td>',
         );
         buffer.write('<td>${_escapeHtml(note.isEmpty ? '-' : note)}</td>');
         buffer.write(
@@ -881,10 +894,14 @@ class _FinancePageState extends State<FinancePage> {
     final typeOptions = ['收入', '支出'];
     String selectedType = item?['type'] as String? ?? '收入';
     String? selectedSupplierCode = item?['supplierCode'] as String?;
+    String? selectedPaymentMethod = item?['paymentMethod'] as String?;
     if (!_suppliers.any(
       (supplier) => supplier['code'] == selectedSupplierCode,
     )) {
       selectedSupplierCode = null;
+    }
+    if (!_expensePaymentMethods.contains(selectedPaymentMethod)) {
+      selectedPaymentMethod = null;
     }
     final dateController = TextEditingController(
       text: item != null ? item['recordDate'] as String? ?? '' : '',
@@ -920,6 +937,7 @@ class _FinancePageState extends State<FinancePage> {
                                 selectedType = option;
                                 if (option != '支出') {
                                   selectedSupplierCode = null;
+                                  selectedPaymentMethod = null;
                                 }
                               });
                             },
@@ -971,6 +989,25 @@ class _FinancePageState extends State<FinancePage> {
                         onChanged: (value) {
                           setDialogState(() {
                             selectedSupplierCode = value;
+                          });
+                        },
+                      ),
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedPaymentMethod,
+                        decoration: const InputDecoration(labelText: '付款方式 *'),
+                        hint: const Text('请选择付款方式'),
+                        items: _expensePaymentMethods
+                            .map(
+                              (method) => DropdownMenuItem<String>(
+                                value: method,
+                                child: Text(method),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            selectedPaymentMethod = value;
                           });
                         },
                       ),
@@ -1105,6 +1142,10 @@ class _FinancePageState extends State<FinancePage> {
                     _showMessage('请选择供应商');
                     return;
                   }
+                  if (selectedType == '支出' && selectedPaymentMethod == null) {
+                    _showMessage('请选择付款方式');
+                    return;
+                  }
                   try {
                     final success = isEdit
                         ? await _service.updateFinanceRecord(
@@ -1115,6 +1156,7 @@ class _FinancePageState extends State<FinancePage> {
                             amount,
                             noteController.text.trim(),
                             selectedSupplierCode,
+                            selectedPaymentMethod,
                           )
                         : await _service.addFinanceRecord(
                             selectedType,
@@ -1123,6 +1165,7 @@ class _FinancePageState extends State<FinancePage> {
                             amount,
                             noteController.text.trim(),
                             selectedSupplierCode,
+                            selectedPaymentMethod,
                           );
                     if (success) {
                       await _loadRecords();
@@ -1399,7 +1442,7 @@ class _FinancePageState extends State<FinancePage> {
                                             '${item['type']}  ￥${_formatAmount(item['amount'])}',
                                           ),
                                           subtitle: Text(
-                                            '${item['recordDate']}${(item['supplierName'] as String? ?? '').trim().isNotEmpty ? ' · ${(item['supplierName'] as String).trim()}' : ''} · ${item['note'] ?? ''}',
+                                            '${item['recordDate']}${(item['supplierName'] as String? ?? '').trim().isNotEmpty ? ' · ${(item['supplierName'] as String).trim()}' : ''}${(item['paymentMethod'] as String? ?? '').trim().isNotEmpty ? ' · ${(item['paymentMethod'] as String).trim()}' : ''} · ${item['note'] ?? ''}',
                                           ),
                                           trailing: Wrap(
                                             spacing: 4,

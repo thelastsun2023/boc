@@ -628,6 +628,7 @@ class SystemService {
     double amount,
     String note,
     String? supplierCode,
+    String? paymentMethod,
   ) async {
     final session = SessionService();
     final imagePath = await _uploadImage(imageBytes, 'finance.jpg');
@@ -638,6 +639,7 @@ class SystemService {
       'note': note,
       'imagePath': imagePath,
       'supplierCode': supplierCode,
+      'paymentMethod': paymentMethod,
       'actorUsername': session.username,
       'storeCode': session.storeCode,
     }, 'Failed to add finance record');
@@ -664,6 +666,7 @@ class SystemService {
     double amount,
     String note,
     String? supplierCode,
+    String? paymentMethod,
   ) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
@@ -674,6 +677,7 @@ class SystemService {
       'amount': amount,
       'note': note,
       'supplierCode': supplierCode,
+      'paymentMethod': paymentMethod,
       'actorUsername': session.username,
       'storeCode': session.storeCode,
     };

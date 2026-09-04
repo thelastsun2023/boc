@@ -8,6 +8,14 @@ import 'package:shelf_static/shelf_static.dart';
 import 'package:postgres/postgres.dart';
 import 'package:crypto/crypto.dart';
 
+const Set<String> _financePaymentMethods = {
+  '店里卡',
+  '店里支票',
+  '自己的卡',
+  '自己的现金',
+  '店里的现金',
+};
+
 // PostgreSQL connection pool. A pool discards broken connections and opens a
 // fresh one after Railway restarts or replaces the Postgres service.
 late Pool<void> _conn;
@@ -412,6 +420,7 @@ Future<void> initDb() async {
       note TEXT,
       image_path VARCHAR(255),
       supplier_code VARCHAR(50),
+      payment_method VARCHAR(50),
       store_code VARCHAR(50),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
@@ -433,6 +442,9 @@ Future<void> initDb() async {
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS supplier_code VARCHAR(50)',
+  );
+  await _conn.execute(
+    'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS payment_method VARCHAR(50)',
   );
   await _conn.execute(
     'ALTER TABLE finance_records ADD COLUMN IF NOT EXISTS store_code VARCHAR(50)',
@@ -3537,6 +3549,7 @@ Future<Response> _addFinanceRecord(Request request) async {
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
     final supplierCode = _normalizedOptionalString(json['supplierCode']);
+    final paymentMethod = _normalizedOptionalString(json['paymentMethod']);
     final storeCode = scope.isAdmin
         ? _normalizedStoreCode(json['storeCode'])
         : scope.storeCode;
@@ -3559,8 +3572,17 @@ Future<Response> _addFinanceRecord(Request request) async {
         },
       );
     }
+    if (type == '支出' && !_financePaymentMethods.contains(paymentMethod)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '支出记录必须选择付款方式'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
     await _conn.execute(
-      'INSERT INTO finance_records (type, record_date, amount, note, image_path, supplier_code, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7)',
+      'INSERT INTO finance_records (type, record_date, amount, note, image_path, supplier_code, payment_method, store_code) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8)',
       parameters: [
         type,
         DateTime.parse(recordDate),
@@ -3568,6 +3590,7 @@ Future<Response> _addFinanceRecord(Request request) async {
         note ?? '',
         imagePath ?? '',
         type == '支出' ? supplierCode : null,
+        type == '支出' ? paymentMethod : null,
         storeCode,
       ],
     );
@@ -3606,8 +3629,8 @@ Future<Response> _getFinanceRecords(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code ORDER BY fr.record_date DESC, fr.id DESC'
-          : 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code WHERE LOWER(COALESCE(fr.store_code, \'\')) = LOWER(\$1) ORDER BY fr.record_date DESC, fr.id DESC',
+          ? 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code ORDER BY fr.record_date DESC, fr.id DESC'
+          : 'SELECT fr.id, fr.type, TO_CHAR(fr.record_date, \'YYYY-MM-DD\'), fr.amount, fr.note, fr.image_path, fr.store_code, fr.supplier_code, s.name, fr.payment_method FROM finance_records fr LEFT JOIN suppliers s ON s.code = fr.supplier_code WHERE LOWER(COALESCE(fr.store_code, \'\')) = LOWER(\$1) ORDER BY fr.record_date DESC, fr.id DESC',
       parameters: scope.isAdmin ? const [] : [scope.storeCode ?? ''],
     );
     final records = result
@@ -3621,6 +3644,7 @@ Future<Response> _getFinanceRecords(Request request) async {
               'storeCode': row[6],
               'supplierCode': row[7],
               'supplierName': row[8],
+              'paymentMethod': row[9],
             })
         .toList();
 
@@ -3663,6 +3687,7 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
     final note = json['note'] as String?;
     final imagePath = json['imagePath'] as String?;
     final supplierCode = _normalizedOptionalString(json['supplierCode']);
+    final paymentMethod = _normalizedOptionalString(json['paymentMethod']);
     final storeCode = scope.isAdmin
         ? _normalizedStoreCode(json['storeCode'])
         : scope.storeCode;
@@ -3710,6 +3735,15 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
         },
       );
     }
+    if (type == '支出' && !_financePaymentMethods.contains(paymentMethod)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': '支出记录必须选择付款方式'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
     final payload = <dynamic>[
       type,
       DateTime.parse(recordDate),
@@ -3717,15 +3751,16 @@ Future<Response> _updateFinanceRecord(Request request, String id) async {
       note ?? '',
       storeCode,
       type == '支出' ? supplierCode : null,
+      type == '支出' ? paymentMethod : null,
     ];
     var sql =
-        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, note = \$4, store_code = \$5, supplier_code = \$6';
+        'UPDATE finance_records SET type = \$1, record_date = \$2, amount = \$3, note = \$4, store_code = \$5, supplier_code = \$6, payment_method = \$7';
     if (imagePath != null && imagePath.isNotEmpty) {
-      sql += ', image_path = \$7 WHERE id = \$8';
+      sql += ', image_path = \$8 WHERE id = \$9';
       payload.add(imagePath);
       payload.add(int.parse(id));
     } else {
-      sql += ' WHERE id = \$7';
+      sql += ' WHERE id = \$8';
       payload.add(int.parse(id));
     }
 
