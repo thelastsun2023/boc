@@ -104,14 +104,16 @@ class _StockOrderPageState extends State<StockOrderPage> {
     return 0;
   }
 
-  bool _isOrderToday(Map<String, dynamic> item) {
-    final value = item['orderToday'];
-    if (value is bool) return value;
-    return _toInt(item['orderQuantity']) > 0;
-  }
-
   bool _isSelectedOrderItem(Map<String, dynamic> item) {
-    return _isOrderToday(item) && _toInt(item['orderQuantity']) > 0;
+    final categorySelected = item['categorySelected'];
+    if (categorySelected is bool) {
+      return categorySelected && _toInt(item['orderQuantity']) > 0;
+    }
+    final legacyOrderToday = item['orderToday'];
+    if (legacyOrderToday is bool) {
+      return legacyOrderToday && _toInt(item['orderQuantity']) > 0;
+    }
+    return _toInt(item['orderQuantity']) > 0;
   }
 
   String _formatDate(String value) {
@@ -214,7 +216,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'currentStock': _toInt(raw['currentStock']),
           'minQuantity': _toDouble(raw['minQuantity']),
           'orderQuantity': _toInt(raw['orderQuantity']),
-          'orderToday': raw['orderToday'] is bool
+          'categorySelected': raw['categorySelected'] is bool
+              ? raw['categorySelected']
+              : raw['orderToday'] is bool
               ? raw['orderToday']
               : _toInt(raw['orderQuantity']) > 0,
           'primarySupplierCode': raw['primarySupplierCode'],
@@ -238,7 +242,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'currentStock': 0,
           'minQuantity': minQuantity,
           'orderQuantity': suggestedQuantity,
-          'orderToday': suggestedQuantity > 0,
+          'categorySelected': true,
           'primarySupplierCode': raw['primarySupplierCode'],
           'primarySupplierName': raw['primarySupplierName'],
           'secondarySupplierCode': raw['secondarySupplierCode'],
@@ -249,6 +253,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
         });
       }
     }
+
+    final categorySelections = <String, bool>{};
 
     await showDialog<void>(
       context: context,
@@ -261,6 +267,15 @@ class _StockOrderPageState extends State<StockOrderPage> {
               categoryGroups.putIfAbsent(category, () => []).add(item);
             }
             final categories = categoryGroups.keys.toList();
+            for (final entry in categoryGroups.entries) {
+              final isCategorySelected = categorySelections.putIfAbsent(
+                entry.key,
+                () => isEdit ? entry.value.any(_isSelectedOrderItem) : true,
+              );
+              for (final item in entry.value) {
+                item['categorySelected'] = isCategorySelected;
+              }
+            }
             return AlertDialog(
               title: Text(
                 isEdit
@@ -306,11 +321,34 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                       indicatorColor: Theme.of(
                                         context,
                                       ).primaryColor,
-                                      tabs: categories
-                                          .map(
-                                            (category) => Tab(text: category),
-                                          )
-                                          .toList(),
+                                      tabs: categories.map((category) {
+                                        return Tab(
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Checkbox(
+                                                value:
+                                                    categorySelections[category] ??
+                                                    true,
+                                                visualDensity:
+                                                    VisualDensity.compact,
+                                                onChanged: (value) {
+                                                  setDialogState(() {
+                                                    categorySelections[category] =
+                                                        value == true;
+                                                    for (final item
+                                                        in categoryGroups[category]!) {
+                                                      item['categorySelected'] =
+                                                          value == true;
+                                                    }
+                                                  });
+                                                },
+                                              ),
+                                              Text(category),
+                                            ],
+                                          ),
+                                        );
+                                      }).toList(),
                                     ),
                                   ),
                                   const SizedBox(height: 12),
@@ -341,9 +379,6 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                               );
                                               final orderQuantity = _toInt(
                                                 item['orderQuantity'],
-                                              );
-                                              final orderToday = _isOrderToday(
-                                                item,
                                               );
                                               final suggested =
                                                   _suggestedOrderQuantity(
@@ -386,29 +421,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                     Text(
                                                       item['description'] ?? '',
                                                     ),
-                                                    const SizedBox(height: 4),
-                                                    CheckboxListTile(
-                                                      contentPadding:
-                                                          EdgeInsets.zero,
-                                                      dense: true,
-                                                      controlAffinity:
-                                                          ListTileControlAffinity
-                                                              .leading,
-                                                      title: Text(
-                                                        _t(
-                                                          '今天点这个货',
-                                                          'Order This Item Today',
-                                                        ),
-                                                      ),
-                                                      value: orderToday,
-                                                      onChanged: (value) {
-                                                        setDialogState(() {
-                                                          item['orderToday'] =
-                                                              value == true;
-                                                        });
-                                                      },
-                                                    ),
-                                                    const SizedBox(height: 4),
+                                                    const SizedBox(height: 8),
                                                     Wrap(
                                                       spacing: 18,
                                                       runSpacing: 8,
@@ -451,11 +464,6 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                                   max(0, value);
                                                               item['orderQuantity'] =
                                                                   newValue;
-                                                              if (newValue >
-                                                                  0) {
-                                                                item['orderToday'] =
-                                                                    true;
-                                                              }
                                                             });
                                                           },
                                                         ),
@@ -504,8 +512,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 SnackBar(
                                   content: Text(
                                     _t(
-                                      '请至少勾选一个今天要点的产品并填写数量',
-                                      'Select at least one item for today and enter its quantity',
+                                      '请至少勾选一个今天要点货的分类，并填写产品数量',
+                                      'Select at least one category for today and enter item quantities',
                                     ),
                                   ),
                                 ),
@@ -524,7 +532,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'currentStock': item['currentStock'],
                                 'minQuantity': item['minQuantity'],
                                 'orderQuantity': item['orderQuantity'],
-                                'orderToday': item['orderToday'],
+                                'categorySelected': item['categorySelected'],
                                 'primarySupplierCode':
                                     item['primarySupplierCode'],
                                 'primarySupplierName':
@@ -618,8 +626,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 SnackBar(
                                   content: Text(
                                     _t(
-                                      '请至少勾选一个今天要点的产品并填写数量',
-                                      'Select at least one item for today and enter its quantity',
+                                      '请至少勾选一个今天要点货的分类，并填写产品数量',
+                                      'Select at least one category for today and enter item quantities',
                                     ),
                                   ),
                                 ),
@@ -639,7 +647,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'currentStock': item['currentStock'],
                                 'minQuantity': item['minQuantity'],
                                 'orderQuantity': item['orderQuantity'],
-                                'orderToday': item['orderToday'],
+                                'categorySelected': item['categorySelected'],
                                 'primarySupplierCode':
                                     item['primarySupplierCode'],
                                 'primarySupplierName':
