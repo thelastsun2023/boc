@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../services/session_service.dart';
 import 'login_page.dart';
 import 'stock_order_page.dart';
-import 'system_view_page.dart';
 import 'todo_page.dart';
 
 class HomePage extends StatefulWidget {
@@ -22,18 +21,12 @@ class _HomePageState extends State<HomePage> {
   List<Map<String, dynamic>> _menuItems() => [
     {
       'index': 0,
-      'icon': Icons.settings,
-      'label': _t('系统设置(只读)', 'System (Read Only)'),
-      'page': const SystemViewPage(),
-    },
-    {
-      'index': 1,
       'icon': Icons.shopping_cart_checkout,
       'label': _t('点货', 'Stock Order'),
       'page': const StockOrderPage(),
     },
     {
-      'index': 2,
+      'index': 1,
       'icon': Icons.task_alt,
       'label': _t('待办事项', 'Todo'),
       'page': const TodoPage(),

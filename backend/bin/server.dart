@@ -697,6 +697,13 @@ bool _canAccessStoreScopedRecord(
       scope.username.toLowerCase();
 }
 
+bool _canAccessTodoTask(_UserScope scope, String? ownerUsername) {
+  if (scope.isAdmin) {
+    return true;
+  }
+  return (ownerUsername ?? '').toLowerCase() == scope.username.toLowerCase();
+}
+
 // CORS middleware with proper OPTIONS handling
 Middleware corsMiddleware() {
   const corsHeaders = {
@@ -4001,19 +4008,10 @@ Future<Response> _getTodoTasks(Request request) async {
           : '''
             SELECT id, title, content, note, TO_CHAR(due_date_time, 'YYYY-MM-DD HH24:MI:SS'), status, owner_username, stock_order_id, supplier_code, task_type, store_code
             FROM todo_tasks
-            WHERE
-              (
-                COALESCE(store_code, '') <> ''
-                AND LOWER(store_code) = LOWER(\$1)
-              )
-              OR (
-                COALESCE(store_code, '') = ''
-                AND LOWER(COALESCE(owner_username, '')) = LOWER(\$2)
-              )
+            WHERE LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
             ORDER BY due_date_time ASC, id DESC
             ''',
-      parameters:
-          scope.isAdmin ? const [] : [scope.storeCode ?? '', scope.username],
+      parameters: scope.isAdmin ? const [] : [scope.username],
     );
     final tasks = result
         .map((row) => {
@@ -4095,7 +4093,7 @@ Future<Response> _updateTodoTask(Request request, String id) async {
     }
 
     final existing = await _conn.execute(
-      'SELECT owner_username, store_code FROM todo_tasks WHERE id = \$1',
+      'SELECT owner_username FROM todo_tasks WHERE id = \$1',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4108,8 +4106,7 @@ Future<Response> _updateTodoTask(Request request, String id) async {
       );
     }
     final existingOwner = existing.first[0] as String?;
-    final existingStoreCode = existing.first[1] as String?;
-    if (!_canAccessStoreScopedRecord(scope, existingStoreCode, existingOwner)) {
+    if (!_canAccessTodoTask(scope, existingOwner)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to update this task'}),
         headers: {
@@ -4197,7 +4194,7 @@ Future<Response> _deleteTodoTask(Request request, String id) async {
       );
     }
     final existing = await _conn.execute(
-      'SELECT owner_username, store_code FROM todo_tasks WHERE id = \$1',
+      'SELECT owner_username FROM todo_tasks WHERE id = \$1',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4209,11 +4206,7 @@ Future<Response> _deleteTodoTask(Request request, String id) async {
         },
       );
     }
-    if (!_canAccessStoreScopedRecord(
-      scope,
-      existing.first[1] as String?,
-      existing.first[0] as String?,
-    )) {
+    if (!_canAccessTodoTask(scope, existing.first[0] as String?)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to delete this task'}),
         headers: {

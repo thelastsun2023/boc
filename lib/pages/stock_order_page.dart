@@ -24,6 +24,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
   bool _isLoading = true;
   String? _error;
 
+  String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
+
   List<Map<String, dynamic>> get _visibleRawMaterials {
     final session = SessionService();
     if (session.isAdmin) {
@@ -109,7 +111,10 @@ class _StockOrderPageState extends State<StockOrderPage> {
     return '${dateTime.year.toString().padLeft(4, '0')}-${dateTime.month.toString().padLeft(2, '0')}-${dateTime.day.toString().padLeft(2, '0')}';
   }
 
-  String _formatChineseDate(DateTime date) {
+  String _formatOrderTitleDate(DateTime date) {
+    if (SessionService().isEnglish) {
+      return _formatDate(date.toIso8601String());
+    }
     return '${date.year}年${date.month.toString().padLeft(2, '0')}月${date.day.toString().padLeft(2, '0')}日';
   }
 
@@ -125,13 +130,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
   String _bilingualText(String? nameCN, String? nameEN) {
     final cn = (nameCN ?? '').trim();
     final en = (nameEN ?? '').trim();
-    if (cn.isEmpty) {
-      return en;
-    }
-    if (en.isEmpty) {
-      return cn;
-    }
-    return SessionService().isEnglish ? '$en / $cn' : '$cn / $en';
+    return SessionService().isEnglish
+        ? (en.isNotEmpty ? en : cn)
+        : (cn.isNotEmpty ? cn : en);
   }
 
   List<Map<String, dynamic>> _normalizeOrderDetails(dynamic details) {
@@ -230,18 +231,28 @@ class _StockOrderPageState extends State<StockOrderPage> {
             }
             final categories = categoryGroups.keys.toList();
             return AlertDialog(
-              title: Text(isEdit ? '编辑点货记录' : '新建点货'),
+              title: Text(
+                isEdit
+                    ? _t('编辑点货记录', 'Edit Stock Order')
+                    : _t('新建点货', 'New Stock Order'),
+              ),
               content: SizedBox(
                 width: 920,
                 height: 560,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('点货日期：${_formatDate(orderDate.toIso8601String())}'),
+                    Text(
+                      '${_t('点货日期', 'Order Date')}: ${_formatDate(orderDate.toIso8601String())}',
+                    ),
                     const SizedBox(height: 12),
                     Expanded(
                       child: items.isEmpty
-                          ? const Center(child: Text('没有原材料记录'))
+                          ? Center(
+                              child: Text(
+                                _t('没有原材料记录', 'No raw materials found'),
+                              ),
+                            )
                           : DefaultTabController(
                               length: categories.length,
                               child: Column(
@@ -350,7 +361,10 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                               .center,
                                                       children: [
                                                         _buildStepper(
-                                                          label: '当前库存',
+                                                          label: _t(
+                                                            '当前库存',
+                                                            'Current Stock',
+                                                          ),
                                                           value: currentStock,
                                                           onChanged: (value) {
                                                             final newValue =
@@ -367,10 +381,13 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                           },
                                                         ),
                                                         Text(
-                                                          '最少储存：${minQuantity.toStringAsFixed(minQuantity.truncateToDouble() == minQuantity ? 0 : 2)}',
+                                                          '${_t('最少储存', 'Minimum Stock')}: ${minQuantity.toStringAsFixed(minQuantity.truncateToDouble() == minQuantity ? 0 : 2)}',
                                                         ),
                                                         _buildStepper(
-                                                          label: '订货数量',
+                                                          label: _t(
+                                                            '订货数量',
+                                                            'Order Quantity',
+                                                          ),
                                                           value: orderQuantity,
                                                           onChanged: (value) {
                                                             setDialogState(() {
@@ -399,11 +416,16 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                                   0;
                                                             });
                                                           },
-                                                          child: const Text(
-                                                            '今天不定',
+                                                          child: Text(
+                                                            _t(
+                                                              '今天不定',
+                                                              'Skip Today',
+                                                            ),
                                                           ),
                                                         ),
-                                                        Text('建议订货：$suggested'),
+                                                        Text(
+                                                          '${_t('建议订货', 'Suggested')}: $suggested',
+                                                        ),
                                                       ],
                                                     ),
                                                   ],
@@ -425,7 +447,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
               actions: [
                 TextButton(
                   onPressed: () => Navigator.of(context).pop(),
-                  child: const Text('取消'),
+                  child: Text(_t('取消', 'Cancel')),
                 ),
                 OutlinedButton(
                   onPressed: isConfirmed || isSubmitting
@@ -445,7 +467,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('请先填写订货数量')),
+                                SnackBar(
+                                  content: Text(
+                                    _t(
+                                      '请先填写订货数量',
+                                      'Please enter an order quantity',
+                                    ),
+                                  ),
+                                ),
                               );
                             }
                             return;
@@ -489,7 +518,12 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                     false,
                                   );
                               if (createdOrderId == null) {
-                                throw Exception('点货单创建失败，未返回编号');
+                                throw Exception(
+                                  _t(
+                                    '点货单创建失败，未返回编号',
+                                    'Failed to create stock order: no order ID returned',
+                                  ),
+                                );
                               }
                             }
 
@@ -497,8 +531,13 @@ class _StockOrderPageState extends State<StockOrderPage> {
                             if (mounted) {
                               Navigator.of(context).pop();
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(
-                                  content: Text('整单已保存，可继续修改后再确认'),
+                                SnackBar(
+                                  content: Text(
+                                    _t(
+                                      '整单已保存，可继续修改后再确认',
+                                      'Order saved. You can edit it before confirming.',
+                                    ),
+                                  ),
                                 ),
                               );
                             }
@@ -508,12 +547,20 @@ class _StockOrderPageState extends State<StockOrderPage> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('保存整单失败: $e')),
+                                SnackBar(
+                                  content: Text(
+                                    '${_t('保存整单失败', 'Failed to save order')}: $e',
+                                  ),
+                                ),
                               );
                             }
                           }
                         },
-                  child: Text(isEdit ? '保存整单' : '生成整单'),
+                  child: Text(
+                    isEdit
+                        ? _t('保存整单', 'Save Order')
+                        : _t('生成整单', 'Create Order'),
+                  ),
                 ),
                 FilledButton(
                   onPressed: isSubmitting
@@ -533,7 +580,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                const SnackBar(content: Text('请先填写订货数量')),
+                                SnackBar(
+                                  content: Text(
+                                    _t(
+                                      '请先填写订货数量',
+                                      'Please enter an order quantity',
+                                    ),
+                                  ),
+                                ),
                               );
                             }
                             return;
@@ -579,7 +633,12 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                     true,
                                   );
                               if (createdOrderId == null) {
-                                throw Exception('点货单创建失败，未返回编号');
+                                throw Exception(
+                                  _t(
+                                    '点货单创建失败，未返回编号',
+                                    'Failed to create stock order: no order ID returned',
+                                  ),
+                                );
                               }
                               orderId = createdOrderId;
                             }
@@ -601,12 +660,20 @@ class _StockOrderPageState extends State<StockOrderPage> {
                             });
                             if (mounted) {
                               ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(content: Text('保存失败: $e')),
+                                SnackBar(
+                                  content: Text(
+                                    '${_t('保存失败', 'Save failed')}: $e',
+                                  ),
+                                ),
                               );
                             }
                           }
                         },
-                  child: Text(isConfirmed ? '更新已确认任务' : '确认并生成任务'),
+                  child: Text(
+                    isConfirmed
+                        ? _t('更新已确认任务', 'Update Confirmed Tasks')
+                        : _t('确认并生成任务', 'Confirm and Create Tasks'),
+                  ),
                 ),
               ],
             );
@@ -650,7 +717,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           : ((item['secondarySupplierName'] as String?)?.trim().isNotEmpty ==
                     true
                 ? item['secondarySupplierName'] as String
-                : '未知供应商');
+                : _t('未知供应商', 'Unknown Supplier'));
 
       final group = supplierGroups.putIfAbsent(supplierCode, () {
         return {
@@ -702,7 +769,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
         final categoryName =
             (item['categoryName'] as String?)?.trim().isNotEmpty == true
             ? item['categoryName'] as String
-            : '未分类';
+            : _t('未分类', 'Uncategorized');
         categoryGroups.putIfAbsent(categoryName, () => []).add(item);
       }
 
@@ -716,12 +783,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
                   final nameText = _bilingualText(nameCN, nameEN);
                   return '$nameText: $quantity';
                 })
-                .join('；');
-            return '${categoryEntry.key}：$lines';
+                .join(SessionService().isEnglish ? '; ' : '；');
+            return '${categoryEntry.key}: $lines';
           })
           .join('\n');
 
-      final title = '${_formatChineseDate(orderDate)} 向$supplierName 订货';
+      final title = SessionService().isEnglish
+          ? '${_formatOrderTitleDate(orderDate)} Order from $supplierName'
+          : '${_formatOrderTitleDate(orderDate)} 向$supplierName 订货';
       final existingTask = primaryTaskBySupplier[supplierCode];
 
       if (existingTask == null) {
@@ -770,16 +839,21 @@ class _StockOrderPageState extends State<StockOrderPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('确认删除'),
-        content: const Text('确定删除该点货记录吗？'),
+        title: Text(_t('确认删除', 'Confirm Delete')),
+        content: Text(
+          _t(
+            '确定删除该点货记录吗？',
+            'Are you sure you want to delete this stock order?',
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(_t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('删除'),
+            child: Text(_t('删除', 'Delete')),
           ),
         ],
       ),
@@ -790,9 +864,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
       await _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('删除失败: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${_t('删除失败', 'Delete failed')}: $e')),
+        );
       }
     }
   }
@@ -808,9 +882,16 @@ class _StockOrderPageState extends State<StockOrderPage> {
         .toList();
     if (selectedItems.isEmpty) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('该整单还没有订货项，无法确认')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(
+              _t(
+                '该整单还没有订货项，无法确认',
+                'This order has no items and cannot be confirmed',
+              ),
+            ),
+          ),
+        );
       }
       return;
     }
@@ -818,16 +899,21 @@ class _StockOrderPageState extends State<StockOrderPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('确认生成任务'),
-        content: const Text('确认后会按供应商同步任务，后续仍可编辑并再次更新任务。'),
+        title: Text(_t('确认生成任务', 'Confirm Task Creation')),
+        content: Text(
+          _t(
+            '确认后会按供应商同步任务，后续仍可编辑并再次更新任务。',
+            'Tasks will be created by supplier. You can edit and update them later.',
+          ),
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(context).pop(false),
-            child: const Text('取消'),
+            child: Text(_t('取消', 'Cancel')),
           ),
           FilledButton(
             onPressed: () => Navigator.of(context).pop(true),
-            child: const Text('确认'),
+            child: Text(_t('确认', 'Confirm')),
           ),
         ],
       ),
@@ -849,9 +935,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
       await _loadData();
     } catch (e) {
       if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(SnackBar(content: Text('确认失败: $e')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('${_t('确认失败', 'Confirmation failed')}: $e')),
+        );
       }
     } finally {
       if (mounted) {
@@ -870,7 +956,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        Text('$label：'),
+        Text('$label:'),
         IconButton(
           iconSize: 32,
           constraints: const BoxConstraints(minWidth: 56, minHeight: 56),
@@ -901,11 +987,11 @@ class _StockOrderPageState extends State<StockOrderPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('点货'),
+        title: Text(_t('点货', 'Stock Orders')),
         actions: [
           IconButton(
             icon: const Icon(Icons.refresh),
-            tooltip: '刷新',
+            tooltip: _t('刷新', 'Refresh'),
             onPressed: _loadData,
           ),
         ],
@@ -923,7 +1009,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '总记录：${_orders.length}',
+                        '${_t('总记录', 'Total Records')}: ${_orders.length}',
                         style: const TextStyle(
                           fontSize: 16,
                           fontWeight: FontWeight.bold,
@@ -932,14 +1018,16 @@ class _StockOrderPageState extends State<StockOrderPage> {
                       FilledButton.icon(
                         onPressed: () => _showOrderDialog(),
                         icon: const Icon(Icons.add_shopping_cart),
-                        label: const Text('新建点货'),
+                        label: Text(_t('新建点货', 'New Stock Order')),
                       ),
                     ],
                   ),
                   const SizedBox(height: 12),
                   Expanded(
                     child: _orders.isEmpty
-                        ? const Center(child: Text('暂无点货记录'))
+                        ? Center(
+                            child: Text(_t('暂无点货记录', 'No stock orders found')),
+                          )
                         : ListView.builder(
                             itemCount: _orders.length,
                             itemBuilder: (context, index) {
@@ -976,7 +1064,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                   .isNotEmpty ==
                                               true
                                         ? item['secondarySupplierName']
-                                        : '未知供应商',
+                                        : _t('未知供应商', 'Unknown Supplier'),
                                   )
                                   .toSet()
                                   .join('、');
@@ -989,7 +1077,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                             .isNotEmpty ==
                                         true
                                     ? item['categoryName'] as String
-                                    : '未分类';
+                                    : _t('未分类', 'Uncategorized');
                                 groupedByCategory
                                     .putIfAbsent(categoryName, () => [])
                                     .add(item);
@@ -1005,7 +1093,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                         children: [
                                           Expanded(
                                             child: Text(
-                                              '点货日期：${order['orderDate']}',
+                                              '${_t('点货日期', 'Order Date')}: ${order['orderDate']}',
                                               style: const TextStyle(
                                                 fontSize: 16,
                                                 fontWeight: FontWeight.bold,
@@ -1013,7 +1101,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                             ),
                                           ),
                                           IconButton(
-                                            tooltip: '编辑',
+                                            tooltip: _t('编辑', 'Edit'),
                                             onPressed: () =>
                                                 _showOrderDialog(order: order),
                                             icon: const Icon(
@@ -1021,7 +1109,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                             ),
                                           ),
                                           IconButton(
-                                            tooltip: '删除',
+                                            tooltip: _t('删除', 'Delete'),
                                             onPressed: () =>
                                                 _confirmDeleteOrder(
                                                   order['id'] as int,
@@ -1034,15 +1122,15 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                       ),
                                       const SizedBox(height: 6),
                                       Text(
-                                        '状态：${isConfirmed ? '已确认' : '整单草稿'}',
+                                        '${_t('状态', 'Status')}: ${isConfirmed ? _t('已确认', 'Confirmed') : _t('整单草稿', 'Draft')}',
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        '门店：${storeCode.isEmpty ? '未标记' : storeCode}  归属人：${ownerUsername.isEmpty ? '-' : ownerUsername}',
+                                        '${_t('门店', 'Store')}: ${storeCode.isEmpty ? _t('未标记', 'Not Set') : storeCode}  ${_t('归属人', 'Owner')}: ${ownerUsername.isEmpty ? '-' : ownerUsername}',
                                       ),
                                       const SizedBox(height: 4),
                                       Text(
-                                        '订货项：$orderCount，供应商：$supplierNames',
+                                        '${_t('订货项', 'Items')}: $orderCount, ${_t('供应商', 'Suppliers')}: $supplierNames',
                                       ),
                                       const SizedBox(height: 10),
                                       if (!isConfirmed)
@@ -1057,13 +1145,19 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                             icon: const Icon(Icons.task_alt),
                                             label: Text(
                                               isProcessing
-                                                  ? '正在生成任务...'
-                                                  : '确认生成任务',
+                                                  ? _t(
+                                                      '正在生成任务...',
+                                                      'Creating Tasks...',
+                                                    )
+                                                  : _t(
+                                                      '确认生成任务',
+                                                      'Confirm and Create Tasks',
+                                                    ),
                                             ),
                                           ),
                                         ),
                                       if (groupedByCategory.isEmpty)
-                                        const Text('暂无订货项')
+                                        Text(_t('暂无订货项', 'No order items'))
                                       else
                                         ...groupedByCategory.entries.map((
                                           entry,
