@@ -90,10 +90,15 @@ class SystemService {
     );
   }
 
-  Future<bool> addRawMaterialCategory(String code, String name) async {
+  Future<bool> addRawMaterialCategory(
+    String code,
+    String nameCN,
+    String nameEN,
+  ) async {
     return _post('/api/raw-material-categories', {
       'code': code,
-      'name': name,
+      'nameCN': nameCN,
+      'nameEN': nameEN,
     }, 'Failed to add raw material category');
   }
 
@@ -105,10 +110,15 @@ class SystemService {
     return List<Map<String, dynamic>>.from(data['categories'] ?? []);
   }
 
-  Future<bool> updateRawMaterialCategory(String code, String name) async {
+  Future<bool> updateRawMaterialCategory(
+    String code,
+    String nameCN,
+    String nameEN,
+  ) async {
     final encodedCode = Uri.encodeComponent(code);
     return _put('/api/raw-material-categories/$encodedCode', {
-      'name': name,
+      'nameCN': nameCN,
+      'nameEN': nameEN,
     }, 'Failed to update raw material category');
   }
 

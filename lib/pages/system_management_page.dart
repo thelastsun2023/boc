@@ -151,7 +151,10 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       }).length;
       options.add({
         'code': code,
-        'label': _orDash(category['name'] as String?),
+        'label': _orderedName(
+          category['nameCN'] as String?,
+          category['nameEN'] as String?,
+        ),
         'count': count,
       });
     }
@@ -414,8 +417,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
     Map<String, dynamic>? item,
   }) async {
     final isEdit = item != null;
-    final nameController = TextEditingController(
-      text: item?['name'] as String? ?? '',
+    final nameCNController = TextEditingController(
+      text: item?['nameCN'] as String? ?? item?['name'] as String? ?? '',
+    );
+    final nameENController = TextEditingController(
+      text: item?['nameEN'] as String? ?? '',
     );
 
     await showDialog<void>(
@@ -434,8 +440,17 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                 ),
               const SizedBox(height: 12),
               TextField(
-                controller: nameController,
-                decoration: const InputDecoration(labelText: 'Category Name'),
+                controller: nameCNController,
+                decoration: const InputDecoration(
+                  labelText: 'Chinese Name / 中文名称',
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                controller: nameENController,
+                decoration: const InputDecoration(
+                  labelText: 'English Name / 英文名称',
+                ),
               ),
             ],
           ),
@@ -447,19 +462,22 @@ class _SystemManagementPageState extends State<SystemManagementPage>
           ),
           FilledButton(
             onPressed: () async {
-              final name = nameController.text.trim();
-              if (name.isEmpty) {
+              final nameCN = nameCNController.text.trim();
+              final nameEN = nameENController.text.trim();
+              if (nameCN.isEmpty) {
                 return;
               }
               try {
                 final success = isEdit
                     ? await _systemService.updateRawMaterialCategory(
                         item['code'] as String,
-                        name,
+                        nameCN,
+                        nameEN,
                       )
                     : await _systemService.addRawMaterialCategory(
                         _generateCode('CAT', _rawMaterialCategories),
-                        name,
+                        nameCN,
+                        nameEN,
                       );
                 if (success) {
                   await _loadAllData();
@@ -495,7 +513,12 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   itemBuilder: (context, index) {
                     final item = _rawMaterialCategories[index];
                     return ListTile(
-                      title: Text(item['name'] as String? ?? '-'),
+                      title: Text(
+                        _orderedName(
+                          item['nameCN'] as String?,
+                          item['nameEN'] as String?,
+                        ),
+                      ),
                       subtitle: Text(item['code'] as String? ?? '-'),
                       trailing: Wrap(
                         spacing: 8,
@@ -507,7 +530,10 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                           ),
                           IconButton(
                             onPressed: () => _confirmDelete(
-                              title: item['name'] as String? ?? '-',
+                              title: _orderedName(
+                                item['nameCN'] as String?,
+                                item['nameEN'] as String?,
+                              ),
                               onDelete: () =>
                                   _systemService.deleteRawMaterialCategory(
                                     item['code'] as String,
@@ -745,7 +771,12 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                       ..._rawMaterialCategories.map(
                         (category) => DropdownMenuItem<String>(
                           value: category['code'] as String,
-                          child: Text(category['name'] as String? ?? '-'),
+                          child: Text(
+                            _orderedName(
+                              category['nameCN'] as String?,
+                              category['nameEN'] as String?,
+                            ),
+                          ),
                         ),
                       ),
                     ],

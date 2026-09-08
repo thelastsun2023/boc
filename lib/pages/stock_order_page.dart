@@ -135,6 +135,21 @@ class _StockOrderPageState extends State<StockOrderPage> {
         : (cn.isNotEmpty ? cn : en);
   }
 
+  String _categoryDisplayName(Map<String, dynamic> item) {
+    final nameCN =
+        (item['categoryNameCN'] as String? ??
+                item['categoryName'] as String? ??
+                '')
+            .trim();
+    final nameEN = (item['categoryNameEN'] as String? ?? '').trim();
+    if (SessionService().isEnglish) {
+      return nameEN.isNotEmpty
+          ? nameEN
+          : (nameCN.isNotEmpty ? nameCN : 'Uncategorized');
+    }
+    return nameCN.isNotEmpty ? nameCN : (nameEN.isNotEmpty ? nameEN : '未分类');
+  }
+
   List<Map<String, dynamic>> _normalizeOrderDetails(dynamic details) {
     if (details is List) {
       return details.map((item) {
@@ -194,6 +209,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'secondarySupplierCode': raw['secondarySupplierCode'],
           'secondarySupplierName': raw['secondarySupplierName'],
           'categoryName': raw['categoryName'] ?? '未分类',
+          'categoryNameCN': raw['categoryNameCN'] ?? raw['categoryName'],
+          'categoryNameEN': raw['categoryNameEN'],
         });
       }
     } else {
@@ -212,6 +229,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'secondarySupplierCode': raw['secondarySupplierCode'],
           'secondarySupplierName': raw['secondarySupplierName'],
           'categoryName': raw['categoryName'] ?? '未分类',
+          'categoryNameCN': raw['categoryNameCN'] ?? raw['categoryName'],
+          'categoryNameEN': raw['categoryNameEN'],
         });
       }
     }
@@ -223,10 +242,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           builder: (context, setDialogState) {
             final categoryGroups = <String, List<Map<String, dynamic>>>{};
             for (final item in items) {
-              final category =
-                  (item['categoryName'] as String?)?.trim().isNotEmpty == true
-                  ? item['categoryName'] as String
-                  : '未分类';
+              final category = _categoryDisplayName(item);
               categoryGroups.putIfAbsent(category, () => []).add(item);
             }
             final categories = categoryGroups.keys.toList();
@@ -499,6 +515,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'secondarySupplierName':
                                     item['secondarySupplierName'],
                                 'categoryName': item['categoryName'],
+                                'categoryNameCN': item['categoryNameCN'],
+                                'categoryNameEN': item['categoryNameEN'],
                               };
                             }).toList();
 
@@ -613,6 +631,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'secondarySupplierName':
                                     item['secondarySupplierName'],
                                 'categoryName': item['categoryName'],
+                                'categoryNameCN': item['categoryNameCN'],
+                                'categoryNameEN': item['categoryNameEN'],
                               };
                             }).toList();
 
@@ -766,10 +786,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
       final items = entry.value['items'] as List<Map<String, dynamic>>;
       final categoryGroups = <String, List<Map<String, dynamic>>>{};
       for (final item in items) {
-        final categoryName =
-            (item['categoryName'] as String?)?.trim().isNotEmpty == true
-            ? item['categoryName'] as String
-            : _t('未分类', 'Uncategorized');
+        final categoryName = _categoryDisplayName(item);
         categoryGroups.putIfAbsent(categoryName, () => []).add(item);
       }
 
@@ -1071,13 +1088,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                               final groupedByCategory =
                                   <String, List<Map<String, dynamic>>>{};
                               for (final item in selectedDetails) {
-                                final categoryName =
-                                    (item['categoryName'] as String?)
-                                            ?.trim()
-                                            .isNotEmpty ==
-                                        true
-                                    ? item['categoryName'] as String
-                                    : _t('未分类', 'Uncategorized');
+                                final categoryName = _categoryDisplayName(item);
                                 groupedByCategory
                                     .putIfAbsent(categoryName, () => [])
                                     .add(item);

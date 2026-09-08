@@ -249,9 +249,13 @@ Future<void> initDb() async {
       id SERIAL PRIMARY KEY,
       code VARCHAR(50) UNIQUE NOT NULL,
       name VARCHAR(255) UNIQUE NOT NULL,
+      name_en VARCHAR(255),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
+  await _conn.execute(
+    'ALTER TABLE raw_material_categories ADD COLUMN IF NOT EXISTS name_en VARCHAR(255)',
+  );
   await _conn.execute('''
     CREATE TABLE IF NOT EXISTS raw_material_locations (
       id SERIAL PRIMARY KEY,
@@ -679,25 +683,7 @@ Future<_UserScope?> _getUserScopeByUsername(String? username) async {
   );
 }
 
-bool _canAccessStoreScopedRecord(
-  _UserScope scope,
-  String? recordStoreCode,
-  String? recordOwnerUsername,
-) {
-  if (scope.isAdmin) {
-    return true;
-  }
-
-  final normalizedRecordStore = _normalizedStoreCode(recordStoreCode);
-  if (scope.storeCode != null && scope.storeCode!.isNotEmpty) {
-    return normalizedRecordStore == scope.storeCode;
-  }
-
-  return (recordOwnerUsername ?? '').toLowerCase() ==
-      scope.username.toLowerCase();
-}
-
-bool _canAccessTodoTask(_UserScope scope, String? ownerUsername) {
+bool _canAccessOwnedRecord(_UserScope scope, String? ownerUsername) {
   if (scope.isAdmin) {
     return true;
   }
@@ -1127,7 +1113,12 @@ Future<Response> _getUsers(Request request) async {
           ARRAY[]::VARCHAR[]
         ) AS allowed_category_codes,
         COALESCE(
-          ARRAY_AGG(DISTINCT c.name) FILTER (WHERE c.name IS NOT NULL),
+          ARRAY_AGG(
+            DISTINCT CASE
+              WHEN NULLIF(TRIM(c.name_en), '') IS NULL THEN c.name
+              ELSE c.name || ' / ' || c.name_en
+            END
+          ) FILTER (WHERE c.name IS NOT NULL),
           ARRAY[]::VARCHAR[]
         ) AS allowed_category_names
       FROM users u
@@ -1628,6 +1619,7 @@ Future<Response> _getRawMaterials(Request request) async {
         ps.name,
         ss.name,
         rc.name,
+        rc.name_en,
         rl.name
       FROM raw_materials rm
       LEFT JOIN suppliers ps ON ps.code = rm.primary_supplier_code
@@ -1653,7 +1645,9 @@ Future<Response> _getRawMaterials(Request request) async {
               'primarySupplierName': row[10],
               'secondarySupplierName': row[11],
               'categoryName': row[12],
-              'locationName': row[13],
+              'categoryNameCN': row[12],
+              'categoryNameEN': row[13],
+              'locationName': row[14],
             })
         .toList();
 
@@ -2007,9 +2001,10 @@ Future<Response> _addRawMaterialCategory(Request request) async {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
     final code = _normalizedOptionalString(json['code']);
-    final name = _normalizedOptionalString(json['name']);
+    final nameCN = _normalizedOptionalString(json['nameCN'] ?? json['name']);
+    final nameEN = _normalizedOptionalString(json['nameEN']);
 
-    if (code == null || name == null) {
+    if (code == null || nameCN == null) {
       return Response.badRequest(
         body: jsonEncode({'error': 'Missing required fields'}),
         headers: {
@@ -2020,8 +2015,8 @@ Future<Response> _addRawMaterialCategory(Request request) async {
     }
 
     await _conn.execute(
-      'INSERT INTO raw_material_categories (code, name) VALUES (\$1, \$2)',
-      parameters: [code, name],
+      'INSERT INTO raw_material_categories (code, name, name_en) VALUES (\$1, \$2, \$3)',
+      parameters: [code, nameCN, nameEN],
     );
 
     return Response.ok(
@@ -2045,10 +2040,18 @@ Future<Response> _addRawMaterialCategory(Request request) async {
 Future<Response> _getRawMaterialCategories(Request request) async {
   try {
     final result = await _conn.execute(
-      'SELECT code, name FROM raw_material_categories ORDER BY name ASC',
+      'SELECT code, name, name_en FROM raw_material_categories ORDER BY name ASC',
     );
-    final categories =
-        result.map((row) => {'code': row[0], 'name': row[1]}).toList();
+    final categories = result
+        .map(
+          (row) => {
+            'code': row[0],
+            'name': row[1],
+            'nameCN': row[1],
+            'nameEN': row[2],
+          },
+        )
+        .toList();
 
     return Response.ok(
       jsonEncode({'categories': categories}),
@@ -2075,9 +2078,10 @@ Future<Response> _updateRawMaterialCategory(
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
-    final name = _normalizedOptionalString(json['name']);
+    final nameCN = _normalizedOptionalString(json['nameCN'] ?? json['name']);
+    final nameEN = _normalizedOptionalString(json['nameEN']);
 
-    if (name == null) {
+    if (nameCN == null) {
       return Response.badRequest(
         body: jsonEncode({'error': 'Missing required fields'}),
         headers: {
@@ -2088,8 +2092,8 @@ Future<Response> _updateRawMaterialCategory(
     }
 
     final result = await _conn.execute(
-      'UPDATE raw_material_categories SET name = \$1 WHERE code = \$2',
-      parameters: [name, code],
+      'UPDATE raw_material_categories SET name = \$1, name_en = \$2 WHERE code = \$3',
+      parameters: [nameCN, nameEN, code],
     );
 
     if (result.affectedRows == 0) {
@@ -4106,7 +4110,7 @@ Future<Response> _updateTodoTask(Request request, String id) async {
       );
     }
     final existingOwner = existing.first[0] as String?;
-    if (!_canAccessTodoTask(scope, existingOwner)) {
+    if (!_canAccessOwnedRecord(scope, existingOwner)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to update this task'}),
         headers: {
@@ -4206,7 +4210,7 @@ Future<Response> _deleteTodoTask(Request request, String id) async {
         },
       );
     }
-    if (!_canAccessTodoTask(scope, existing.first[0] as String?)) {
+    if (!_canAccessOwnedRecord(scope, existing.first[0] as String?)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to delete this task'}),
         headers: {
@@ -4334,19 +4338,10 @@ Future<Response> _getStockOrders(Request request) async {
           : '''
             SELECT id, TO_CHAR(order_date, 'YYYY-MM-DD'), details, is_confirmed, TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS'), owner_username, store_code
             FROM stock_orders
-            WHERE
-              (
-                COALESCE(store_code, '') <> ''
-                AND LOWER(store_code) = LOWER(\$1)
-              )
-              OR (
-                COALESCE(store_code, '') = ''
-                AND LOWER(COALESCE(owner_username, '')) = LOWER(\$2)
-              )
+            WHERE LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
             ORDER BY order_date DESC, id DESC
             ''',
-      parameters:
-          scope.isAdmin ? const [] : [scope.storeCode ?? '', scope.username],
+      parameters: scope.isAdmin ? const [] : [scope.username],
     );
     final orders = result.map((row) {
       final detailsText = row[2] as String? ?? '[]';
@@ -4415,7 +4410,7 @@ Future<Response> _updateStockOrder(Request request, String id) async {
     }
 
     final existing = await _conn.execute(
-      'SELECT owner_username, store_code FROM stock_orders WHERE id = \$1',
+      'SELECT owner_username FROM stock_orders WHERE id = \$1',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4427,11 +4422,7 @@ Future<Response> _updateStockOrder(Request request, String id) async {
         },
       );
     }
-    if (!_canAccessStoreScopedRecord(
-      scope,
-      existing.first[1] as String?,
-      existing.first[0] as String?,
-    )) {
+    if (!_canAccessOwnedRecord(scope, existing.first[0] as String?)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to update this stock order'}),
         headers: {
@@ -4494,7 +4485,7 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
       );
     }
     final existing = await _conn.execute(
-      'SELECT owner_username, store_code FROM stock_orders WHERE id = \$1',
+      'SELECT owner_username FROM stock_orders WHERE id = \$1',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4506,11 +4497,7 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
         },
       );
     }
-    if (!_canAccessStoreScopedRecord(
-      scope,
-      existing.first[1] as String?,
-      existing.first[0] as String?,
-    )) {
+    if (!_canAccessOwnedRecord(scope, existing.first[0] as String?)) {
       return Response.forbidden(
         jsonEncode({'error': 'No permission to delete this stock order'}),
         headers: {

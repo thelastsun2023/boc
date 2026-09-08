@@ -18,6 +18,14 @@ class _UserManagementPageState extends State<UserManagementPage> {
   bool _isLoading = true;
   String? _error;
 
+  String _categoryName(Map<String, dynamic> category) {
+    final nameCN = (category['nameCN'] as String? ?? '').trim();
+    final nameEN = (category['nameEN'] as String? ?? '').trim();
+    if (nameCN.isEmpty) return nameEN;
+    if (nameEN.isEmpty) return nameCN;
+    return '$nameCN / $nameEN';
+  }
+
   @override
   void initState() {
     super.initState();
@@ -199,11 +207,11 @@ class _UserManagementPageState extends State<UserManagementPage> {
                         shrinkWrap: true,
                         children: _rawMaterialCategories.map((category) {
                           final code = category['code'] as String? ?? '';
-                          final name = category['name'] as String? ?? code;
+                          final name = _categoryName(category);
                           return CheckboxListTile(
                             dense: true,
                             value: selectedCategoryCodes.contains(code),
-                            title: Text(name),
+                            title: Text(name.isEmpty ? code : name),
                             subtitle: Text(code),
                             onChanged: (value) {
                               setDialogState(() {
