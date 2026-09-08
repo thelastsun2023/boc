@@ -147,6 +147,22 @@ class _StockOrderPageState extends State<StockOrderPage> {
         : (cn.isNotEmpty ? cn : en);
   }
 
+  String _alwaysBilingualText(String? nameCN, String? nameEN) {
+    final cn = (nameCN ?? '').trim();
+    final en = (nameEN ?? '').trim();
+    if (cn.isEmpty) return en;
+    if (en.isEmpty || en.toLowerCase() == cn.toLowerCase()) return cn;
+    return '$cn / $en';
+  }
+
+  String _categoryBilingualName(Map<String, dynamic> item) {
+    final nameCN =
+        item['categoryNameCN'] as String? ?? item['categoryName'] as String?;
+    final nameEN = item['categoryNameEN'] as String?;
+    final name = _alwaysBilingualText(nameCN, nameEN);
+    return name.isEmpty ? '未分类 / Uncategorized' : name;
+  }
+
   String _categoryDisplayName(Map<String, dynamic> item) {
     final nameCN =
         (item['categoryNameCN'] as String? ??
@@ -469,6 +485,23 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                                         ),
                                                         Text(
                                                           '${_t('建议订货', 'Suggested')}: $suggested',
+                                                        ),
+                                                        OutlinedButton.icon(
+                                                          onPressed: () {
+                                                            setDialogState(() {
+                                                              item['orderQuantity'] =
+                                                                  0;
+                                                            });
+                                                          },
+                                                          icon: const Icon(
+                                                            Icons.block,
+                                                          ),
+                                                          label: Text(
+                                                            _t(
+                                                              '今天不订',
+                                                              "Don't Order Today",
+                                                            ),
+                                                          ),
                                                         ),
                                                       ],
                                                     ),
@@ -812,7 +845,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
       final items = entry.value['items'] as List<Map<String, dynamic>>;
       final categoryGroups = <String, List<Map<String, dynamic>>>{};
       for (final item in items) {
-        final categoryName = _categoryDisplayName(item);
+        final categoryName = _categoryBilingualName(item);
         categoryGroups.putIfAbsent(categoryName, () => []).add(item);
       }
 
@@ -823,8 +856,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
           final nameCN = item['nameCN'] as String? ?? '';
           final nameEN = item['nameEN'] as String? ?? '';
           final quantity = _toInt(item['orderQuantity']);
-          final nameText = _bilingualText(nameCN, nameEN);
-          contentLines.add('$nameText: $quantity');
+          final nameText = _alwaysBilingualText(nameCN, nameEN);
+          contentLines.add('$nameText × $quantity');
         }
       }
       final content = '${contentLines.join('\n')}\n';
