@@ -130,6 +130,48 @@ String? _getConfig(String key) {
   return null;
 }
 
+const List<String> _serialIdTables = [
+  'users',
+  'raw_materials',
+  'raw_material_categories',
+  'raw_material_locations',
+  'suppliers',
+  'units',
+  'regions',
+  'stores',
+  'semi_products',
+  'semi_product_stock_checks',
+  'semi_product_categories',
+  'finance_records',
+  'todo_tasks',
+  'stock_orders',
+  'kitchen_tools',
+  'processes',
+  'tools',
+  'menu_categories',
+  'menus',
+];
+
+Future<void> _advanceSerialIdSequences() async {
+  for (final tableName in _serialIdTables) {
+    await _conn.execute('''
+      SELECT setval(
+        pg_get_serial_sequence('$tableName', 'id'),
+        (SELECT MAX(id) FROM $tableName),
+        TRUE
+      )
+      WHERE (SELECT MAX(id) FROM $tableName) IS NOT NULL
+        AND (SELECT MAX(id) FROM $tableName) >=
+            COALESCE(
+              pg_sequence_last_value(
+                pg_get_serial_sequence('$tableName', 'id')::regclass
+              ),
+              0
+            )
+    ''');
+  }
+}
+
 // Database initialization
 Future<void> initDb() async {
   await _uploadImagesDir.create(recursive: true);
@@ -470,6 +512,7 @@ Future<void> initDb() async {
       stock_order_id INTEGER,
       supplier_code VARCHAR(50),
       task_type VARCHAR(50),
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
@@ -506,6 +549,9 @@ Future<void> initDb() async {
   await _conn.execute(
     'ALTER TABLE todo_tasks ADD COLUMN IF NOT EXISTS store_code VARCHAR(50)',
   );
+  await _conn.execute(
+    'ALTER TABLE todo_tasks ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
+  );
 
   await _conn.execute('''
     CREATE TABLE IF NOT EXISTS stock_orders (
@@ -514,6 +560,7 @@ Future<void> initDb() async {
       details TEXT NOT NULL,
       owner_username VARCHAR(255),
       store_code VARCHAR(50),
+      is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
@@ -532,13 +579,9 @@ Future<void> initDb() async {
   await _conn.execute(
     'ALTER TABLE stock_orders ADD COLUMN IF NOT EXISTS store_code VARCHAR(50)',
   );
-  await _conn.execute('''
-    SELECT setval(
-      pg_get_serial_sequence('stock_orders', 'id'),
-      COALESCE((SELECT MAX(id) FROM stock_orders), 1),
-      EXISTS (SELECT 1 FROM stock_orders)
-    )
-  ''');
+  await _conn.execute(
+    'ALTER TABLE stock_orders ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
+  );
 
   // Create kitchen_tools table
   await _conn.execute('''
@@ -604,6 +647,10 @@ Future<void> initDb() async {
       FOREIGN KEY (category_code) REFERENCES menu_categories(code) ON DELETE SET NULL
     )
   ''');
+
+  // Imported or manually restored rows can leave PostgreSQL sequences behind
+  // their table data. Only advance sequences here; never move them backwards.
+  await _advanceSerialIdSequences();
 
   // Seed or synchronize admin user to lowercase credentials
   final hashedPw = sha256.convert(utf8.encode('admin')).toString();
@@ -4008,11 +4055,12 @@ Future<Response> _getTodoTasks(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT id, title, content, note, TO_CHAR(due_date_time, \'YYYY-MM-DD HH24:MI:SS\'), status, owner_username, stock_order_id, supplier_code, task_type, store_code FROM todo_tasks ORDER BY due_date_time ASC, id DESC'
+          ? 'SELECT id, title, content, note, TO_CHAR(due_date_time, \'YYYY-MM-DD HH24:MI:SS\'), status, owner_username, stock_order_id, supplier_code, task_type, store_code FROM todo_tasks WHERE is_deleted = FALSE ORDER BY due_date_time ASC, id DESC'
           : '''
             SELECT id, title, content, note, TO_CHAR(due_date_time, 'YYYY-MM-DD HH24:MI:SS'), status, owner_username, stock_order_id, supplier_code, task_type, store_code
             FROM todo_tasks
-            WHERE LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
+            WHERE is_deleted = FALSE
+              AND LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
             ORDER BY due_date_time ASC, id DESC
             ''',
       parameters: scope.isAdmin ? const [] : [scope.username],
@@ -4097,7 +4145,7 @@ Future<Response> _updateTodoTask(Request request, String id) async {
     }
 
     final existing = await _conn.execute(
-      'SELECT owner_username FROM todo_tasks WHERE id = \$1',
+      'SELECT owner_username FROM todo_tasks WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4150,7 +4198,9 @@ Future<Response> _updateTodoTask(Request request, String id) async {
       sql.write(', task_type = \$${parameters.length + 1}');
       parameters.add(taskType);
     }
-    sql.write(' WHERE id = \$${parameters.length + 1}');
+    sql.write(
+      ' WHERE id = \$${parameters.length + 1} AND is_deleted = FALSE',
+    );
     parameters.add(int.parse(id));
 
     final result = await _conn.execute(sql.toString(), parameters: parameters);
@@ -4198,7 +4248,7 @@ Future<Response> _deleteTodoTask(Request request, String id) async {
       );
     }
     final existing = await _conn.execute(
-      'SELECT owner_username FROM todo_tasks WHERE id = \$1',
+      'SELECT owner_username FROM todo_tasks WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4221,7 +4271,7 @@ Future<Response> _deleteTodoTask(Request request, String id) async {
     }
 
     final result = await _conn.execute(
-      'DELETE FROM todo_tasks WHERE id = \$1',
+      'UPDATE todo_tasks SET is_deleted = TRUE WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
 
@@ -4334,11 +4384,12 @@ Future<Response> _getStockOrders(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT id, TO_CHAR(order_date, \'YYYY-MM-DD\'), details, is_confirmed, TO_CHAR(created_at, \'YYYY-MM-DD HH24:MI:SS\'), owner_username, store_code FROM stock_orders ORDER BY order_date DESC, id DESC'
+          ? 'SELECT id, TO_CHAR(order_date, \'YYYY-MM-DD\'), details, is_confirmed, TO_CHAR(created_at, \'YYYY-MM-DD HH24:MI:SS\'), owner_username, store_code FROM stock_orders WHERE is_deleted = FALSE ORDER BY order_date DESC, id DESC'
           : '''
             SELECT id, TO_CHAR(order_date, 'YYYY-MM-DD'), details, is_confirmed, TO_CHAR(created_at, 'YYYY-MM-DD HH24:MI:SS'), owner_username, store_code
             FROM stock_orders
-            WHERE LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
+            WHERE is_deleted = FALSE
+              AND LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
             ORDER BY order_date DESC, id DESC
             ''',
       parameters: scope.isAdmin ? const [] : [scope.username],
@@ -4410,7 +4461,7 @@ Future<Response> _updateStockOrder(Request request, String id) async {
     }
 
     final existing = await _conn.execute(
-      'SELECT owner_username FROM stock_orders WHERE id = \$1',
+      'SELECT owner_username FROM stock_orders WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4434,11 +4485,11 @@ Future<Response> _updateStockOrder(Request request, String id) async {
 
     final result = hasIsConfirmed
         ? await _conn.execute(
-            'UPDATE stock_orders SET details = \$1, is_confirmed = \$2 WHERE id = \$3',
+            'UPDATE stock_orders SET details = \$1, is_confirmed = \$2 WHERE id = \$3 AND is_deleted = FALSE',
             parameters: [jsonEncode(details), isConfirmed, int.parse(id)],
           )
         : await _conn.execute(
-            'UPDATE stock_orders SET details = \$1 WHERE id = \$2',
+            'UPDATE stock_orders SET details = \$1 WHERE id = \$2 AND is_deleted = FALSE',
             parameters: [jsonEncode(details), int.parse(id)],
           );
 
@@ -4485,7 +4536,7 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
       );
     }
     final existing = await _conn.execute(
-      'SELECT owner_username FROM stock_orders WHERE id = \$1',
+      'SELECT owner_username FROM stock_orders WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4508,11 +4559,11 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
     }
 
     await _conn.execute(
-      'DELETE FROM todo_tasks WHERE stock_order_id = \$1 AND task_type = \$2',
+      'UPDATE todo_tasks SET is_deleted = TRUE WHERE stock_order_id = \$1 AND task_type = \$2 AND is_deleted = FALSE',
       parameters: [int.parse(id), 'stock_order'],
     );
     final result = await _conn.execute(
-      'DELETE FROM stock_orders WHERE id = \$1',
+      'UPDATE stock_orders SET is_deleted = TRUE WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
 
