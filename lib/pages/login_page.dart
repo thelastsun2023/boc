@@ -28,9 +28,11 @@ class _LoginPageState extends State<LoginPage> {
     final user = _userCtrl.text.trim();
     final pass = _passCtrl.text;
     if (user.isEmpty || pass.isEmpty) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text('请输入用户名和密码')));
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('请输入用户名和密码 / Please enter username and password'),
+        ),
+      );
       return;
     }
 
@@ -42,9 +44,11 @@ class _LoginPageState extends State<LoginPage> {
       }
 
       if (loginResult == null) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('用户名或密码错误')));
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('用户名或密码错误 / Invalid username or password'),
+          ),
+        );
         return;
       }
 
@@ -76,7 +80,7 @@ class _LoginPageState extends State<LoginPage> {
       }
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text('登录失败: $e')));
+      ).showSnackBar(SnackBar(content: Text('登录失败 / Login failed: $e')));
     } finally {
       if (mounted) {
         setState(() => _loading = false);
@@ -123,7 +127,7 @@ class _LoginPageState extends State<LoginPage> {
                         ),
                         const SizedBox(width: 14),
                         const Text(
-                          '系统登录',
+                          '系统登录 / System Login',
                           style: TextStyle(
                             color: Colors.white,
                             fontSize: 20,
@@ -140,12 +144,16 @@ class _LoginPageState extends State<LoginPage> {
                       children: [
                         TextField(
                           controller: _userCtrl,
-                          decoration: const InputDecoration(labelText: '用户名'),
+                          decoration: const InputDecoration(
+                            labelText: '用户名 / Username',
+                          ),
                         ),
                         const SizedBox(height: 12),
                         TextField(
                           controller: _passCtrl,
-                          decoration: const InputDecoration(labelText: '密码'),
+                          decoration: const InputDecoration(
+                            labelText: '密码 / Password',
+                          ),
                           obscureText: true,
                           onSubmitted: (_) => _loading ? null : _doLogin(),
                         ),
@@ -163,7 +171,7 @@ class _LoginPageState extends State<LoginPage> {
                                       color: Colors.white,
                                     ),
                                   )
-                                : const Text('登录'),
+                                : const Text('登录 / Login'),
                           ),
                         ),
                       ],
