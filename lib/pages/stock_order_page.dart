@@ -258,7 +258,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'currentStock': 0,
           'minQuantity': minQuantity,
           'orderQuantity': suggestedQuantity,
-          'categorySelected': true,
+          'categorySelected': false,
           'primarySupplierCode': raw['primarySupplierCode'],
           'primarySupplierName': raw['primarySupplierName'],
           'secondarySupplierCode': raw['secondarySupplierCode'],
@@ -286,7 +286,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
             for (final entry in categoryGroups.entries) {
               final isCategorySelected = categorySelections.putIfAbsent(
                 entry.key,
-                () => isEdit ? entry.value.any(_isSelectedOrderItem) : true,
+                () => isEdit ? entry.value.any(_isSelectedOrderItem) : false,
               );
               for (final item in entry.value) {
                 item['categorySelected'] = isCategorySelected;
