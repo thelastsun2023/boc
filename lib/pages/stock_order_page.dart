@@ -768,11 +768,11 @@ class _StockOrderPageState extends State<StockOrderPage> {
     List<Map<String, dynamic>> selectedItems,
   ) async {
     if (selectedItems.isEmpty) {
-      final existingTasks = await _service.getTodoTasks();
+      final existingTasks = await _service.getTodoTasks(
+        stockOrderId: stockOrderId,
+      );
       final linkedTasks = existingTasks.where((task) {
-        final taskStockOrderId = _toInt(task['stockOrderId']);
-        return (task['taskType'] as String? ?? '').trim() == 'stock_order' &&
-            taskStockOrderId == stockOrderId;
+        return (task['taskType'] as String? ?? '').trim() == 'stock_order';
       }).toList();
       for (final task in linkedTasks) {
         await _service.deleteTodoTask(_toInt(task['id']));
@@ -807,11 +807,11 @@ class _StockOrderPageState extends State<StockOrderPage> {
       (group['items'] as List<Map<String, dynamic>>).add(item);
     }
 
-    final existingTasks = await _service.getTodoTasks();
+    final existingTasks = await _service.getTodoTasks(
+      stockOrderId: stockOrderId,
+    );
     final linkedTasks = existingTasks.where((task) {
-      final taskStockOrderId = _toInt(task['stockOrderId']);
-      return (task['taskType'] as String? ?? '').trim() == 'stock_order' &&
-          taskStockOrderId == stockOrderId;
+      return (task['taskType'] as String? ?? '').trim() == 'stock_order';
     }).toList();
     final linkedTasksBySupplier = <String, List<Map<String, dynamic>>>{};
     for (final task in linkedTasks) {

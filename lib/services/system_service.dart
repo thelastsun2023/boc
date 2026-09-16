@@ -503,7 +503,7 @@ class SystemService {
     }, 'Failed to add todo task');
   }
 
-  Future<List<Map<String, dynamic>>> getTodoTasks() async {
+  Future<List<Map<String, dynamic>>> getTodoTasks({int? stockOrderId}) async {
     final session = SessionService();
     final params = <String, String>{};
     if (session.username?.trim().isNotEmpty == true) {
@@ -511,6 +511,9 @@ class SystemService {
     }
     if (session.role?.trim().isNotEmpty == true) {
       params['role'] = session.role!.trim();
+    }
+    if (stockOrderId != null) {
+      params['stockOrderId'] = stockOrderId.toString();
     }
     final path = params.isEmpty
         ? '/api/todo-tasks'

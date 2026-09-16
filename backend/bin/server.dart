@@ -582,6 +582,26 @@ Future<void> initDb() async {
   await _conn.execute(
     'ALTER TABLE stock_orders ADD COLUMN IF NOT EXISTS is_deleted BOOLEAN NOT NULL DEFAULT FALSE',
   );
+  await _conn.execute(
+    'CREATE INDEX IF NOT EXISTS idx_todo_tasks_stock_order_id ON todo_tasks (stock_order_id)',
+  );
+  await _conn.execute(r'''
+    DO $$
+    BEGIN
+      IF NOT EXISTS (
+        SELECT 1
+        FROM pg_constraint
+        WHERE conname = 'todo_tasks_stock_order_id_fk'
+      ) THEN
+        ALTER TABLE todo_tasks
+          ADD CONSTRAINT todo_tasks_stock_order_id_fk
+          FOREIGN KEY (stock_order_id)
+          REFERENCES stock_orders(id)
+          NOT VALID;
+      END IF;
+    END
+    $$;
+  ''');
 
   // Create kitchen_tools table
   await _conn.execute('''
@@ -4043,6 +4063,9 @@ Future<Response> _getTodoTasks(Request request) async {
     final username = _normalizedOptionalString(
       request.requestedUri.queryParameters['username'],
     );
+    final stockOrderId = int.tryParse(
+      request.requestedUri.queryParameters['stockOrderId'] ?? '',
+    );
     final scope = await _getUserScopeByUsername(username);
     if (scope == null) {
       return Response.badRequest(
@@ -4055,15 +4078,37 @@ Future<Response> _getTodoTasks(Request request) async {
     }
     final result = await _conn.execute(
       scope.isAdmin
-          ? 'SELECT id, title, content, note, TO_CHAR(due_date_time, \'YYYY-MM-DD HH24:MI:SS\'), status, owner_username, stock_order_id, supplier_code, task_type, store_code FROM todo_tasks WHERE is_deleted = FALSE ORDER BY due_date_time ASC, id DESC'
-          : '''
+          ? stockOrderId == null
+              ? 'SELECT id, title, content, note, TO_CHAR(due_date_time, \'YYYY-MM-DD HH24:MI:SS\'), status, owner_username, stock_order_id, supplier_code, task_type, store_code FROM todo_tasks WHERE is_deleted = FALSE ORDER BY due_date_time ASC, id DESC'
+              : '''
+                  SELECT id, title, content, note, TO_CHAR(due_date_time, 'YYYY-MM-DD HH24:MI:SS'), status, owner_username, stock_order_id, supplier_code, task_type, store_code
+                  FROM todo_tasks
+                  WHERE is_deleted = FALSE AND stock_order_id = \$1
+                  ORDER BY due_date_time ASC, id DESC
+                  '''
+          : stockOrderId == null
+              ? '''
             SELECT id, title, content, note, TO_CHAR(due_date_time, 'YYYY-MM-DD HH24:MI:SS'), status, owner_username, stock_order_id, supplier_code, task_type, store_code
             FROM todo_tasks
             WHERE is_deleted = FALSE
               AND LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
             ORDER BY due_date_time ASC, id DESC
+            '''
+              : '''
+            SELECT id, title, content, note, TO_CHAR(due_date_time, 'YYYY-MM-DD HH24:MI:SS'), status, owner_username, stock_order_id, supplier_code, task_type, store_code
+            FROM todo_tasks
+            WHERE is_deleted = FALSE
+              AND LOWER(COALESCE(owner_username, '')) = LOWER(\$1)
+              AND stock_order_id = \$2
+            ORDER BY due_date_time ASC, id DESC
             ''',
-      parameters: scope.isAdmin ? const [] : [scope.username],
+      parameters: scope.isAdmin
+          ? stockOrderId == null
+              ? const []
+              : [stockOrderId]
+          : stockOrderId == null
+              ? [scope.username]
+              : [scope.username, stockOrderId],
     );
     final tasks = result
         .map((row) => {
