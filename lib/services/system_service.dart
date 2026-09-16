@@ -176,6 +176,7 @@ class SystemService {
     String alias,
     String address,
     String contact,
+    String phone,
   ) async {
     return _post('/api/suppliers', {
       'code': code,
@@ -183,6 +184,7 @@ class SystemService {
       'alias': alias,
       'address': address,
       'contact': contact,
+      'phone': phone,
     }, 'Failed to add supplier');
   }
 
@@ -197,6 +199,7 @@ class SystemService {
     String alias,
     String address,
     String contact,
+    String phone,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
     return _put('/api/suppliers/$encodedCode', {
@@ -204,6 +207,7 @@ class SystemService {
       'alias': alias,
       'address': address,
       'contact': contact,
+      'phone': phone,
     }, 'Failed to update supplier');
   }
 
@@ -486,6 +490,7 @@ class SystemService {
     int? stockOrderId,
     String? supplierCode,
     String? taskType,
+    String? storeCode,
   }) async {
     final session = SessionService();
     return _post('/api/todo-tasks', {
@@ -495,7 +500,7 @@ class SystemService {
       'dueDateTime': dueDateTime,
       'status': status,
       'actorUsername': session.username,
-      'storeCode': session.storeCode,
+      'storeCode': storeCode ?? session.storeCode,
       'ownerUsername': ownerUsername,
       'stockOrderId': stockOrderId,
       'supplierCode': supplierCode,
@@ -533,6 +538,7 @@ class SystemService {
     int? stockOrderId,
     String? supplierCode,
     String? taskType,
+    String? storeCode,
   }) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
@@ -543,7 +549,7 @@ class SystemService {
       'dueDateTime': dueDateTime,
       'status': status,
       'actorUsername': session.username,
-      'storeCode': session.storeCode,
+      'storeCode': storeCode ?? session.storeCode,
       'ownerUsername': ownerUsername,
       'stockOrderId': stockOrderId,
       'supplierCode': supplierCode,
@@ -554,8 +560,9 @@ class SystemService {
   Future<int?> addStockOrder(
     String orderDate,
     List<Map<String, dynamic>> details,
-    bool isConfirmed,
-  ) async {
+    bool isConfirmed, {
+    String? storeCode,
+  }) async {
     try {
       final session = SessionService();
       final uri = Uri.parse('$baseUrl/api/stock-orders');
@@ -567,7 +574,7 @@ class SystemService {
           'details': details,
           'isConfirmed': isConfirmed,
           'actorUsername': session.username,
-          'storeCode': session.storeCode,
+          'storeCode': storeCode ?? session.storeCode,
         }),
       );
       if (response.statusCode == 200) {
@@ -596,16 +603,54 @@ class SystemService {
   Future<bool> updateStockOrder(
     int id,
     List<Map<String, dynamic>> details,
-    bool isConfirmed,
-  ) async {
+    bool isConfirmed, {
+    String? storeCode,
+  }) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
     return _put('/api/stock-orders/$encodedId', {
       'details': details,
       'isConfirmed': isConfirmed,
       'actorUsername': session.username,
-      'storeCode': session.storeCode,
+      'storeCode': storeCode ?? session.storeCode,
     }, 'Failed to update stock order');
+  }
+
+  Future<Map<String, dynamic>> getSmsSettings() async {
+    final session = SessionService();
+    final username = Uri.encodeQueryComponent(session.username ?? '');
+    return _get(
+      '/api/sms-settings?username=$username',
+      'Failed to get SMS settings',
+    );
+  }
+
+  Future<bool> updateSmsSettings(List<String> phones) async {
+    final session = SessionService();
+    return _put('/api/sms-settings', {
+      'actorUsername': session.username,
+      'phones': phones,
+    }, 'Failed to update SMS settings');
+  }
+
+  Future<Map<String, dynamic>> sendStockOrderSms(
+    int id, {
+    required bool sendSupplierSms,
+  }) async {
+    final session = SessionService();
+    final uri = Uri.parse('$baseUrl/api/stock-orders/$id/send-sms');
+    final response = await http.post(
+      uri,
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'actorUsername': session.username,
+        'sendSupplierSms': sendSupplierSms,
+      }),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body) as Map<String, dynamic>;
+    }
+    throw Exception('HTTP ${response.statusCode}: ${response.body}');
   }
 
   Future<bool> deleteStockOrder(int id) async {

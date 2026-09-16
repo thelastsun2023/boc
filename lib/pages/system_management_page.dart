@@ -33,8 +33,12 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   final List<Map<String, dynamic>> _kitchenTools = [];
   final List<Map<String, dynamic>> _processes = [];
   final List<Map<String, dynamic>> _tools = [];
+  final List<TextEditingController> _reminderPhoneControllers = [];
 
   bool _isLoading = true;
+  bool _isSavingReminderSettings = false;
+  bool _isSmsConfigured = false;
+  String? _smsFromNumber;
   String? _error;
   String? _selectedRawMaterialCategoryCode;
   String? _selectedRawMaterialListCode;
@@ -177,9 +181,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   @override
   void initState() {
     super.initState();
-    final initialIndex = widget.initialTabIndex.clamp(0, 7);
+    final initialIndex = widget.initialTabIndex.clamp(0, 8);
     _tabController = TabController(
-      length: 8,
+      length: 9,
       vsync: this,
       initialIndex: initialIndex,
     );
@@ -189,6 +193,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   @override
   void dispose() {
     _tabController.dispose();
+    for (final controller in _reminderPhoneControllers) {
+      controller.dispose();
+    }
     super.dispose();
   }
 
@@ -212,6 +219,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       final kitchenTools = await _systemService.getKitchenTools();
       final processes = await _systemService.getProcesses();
       final tools = await _systemService.getTools();
+      final smsSettings = await _systemService.getSmsSettings();
 
       if (!mounted) {
         return;
@@ -251,6 +259,18 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _tools
           ..clear()
           ..addAll(tools);
+        for (final controller in _reminderPhoneControllers) {
+          controller.dispose();
+        }
+        _reminderPhoneControllers
+          ..clear()
+          ..addAll(
+            (smsSettings['phones'] as List<dynamic>? ?? const [])
+                .take(3)
+                .map((phone) => TextEditingController(text: phone.toString())),
+          );
+        _isSmsConfigured = smsSettings['configured'] == true;
+        _smsFromNumber = smsSettings['fromNumber'] as String?;
         final hasSelectedCategory =
             _selectedRawMaterialCategoryCode == null ||
             _rawMaterialFilterOptions.any(
@@ -1018,6 +1038,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
     final contactController = TextEditingController(
       text: item?['contact'] as String? ?? '',
     );
+    final phoneController = TextEditingController(
+      text: item?['phone'] as String? ?? '',
+    );
 
     await showDialog<void>(
       context: context,
@@ -1054,6 +1077,15 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   controller: contactController,
                   decoration: const InputDecoration(labelText: '联系方式'),
                 ),
+                const SizedBox(height: 12),
+                TextField(
+                  controller: phoneController,
+                  keyboardType: TextInputType.phone,
+                  decoration: const InputDecoration(
+                    labelText: '短信电话 / SMS Phone',
+                    hintText: '+14035551234',
+                  ),
+                ),
               ],
             ),
           ),
@@ -1077,6 +1109,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         aliasController.text.trim(),
                         addressController.text.trim(),
                         contactController.text.trim(),
+                        phoneController.text.trim(),
                       )
                     : await _systemService.addSupplier(
                         _generateCode('SUP', _suppliers),
@@ -1084,6 +1117,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         aliasController.text.trim(),
                         addressController.text.trim(),
                         contactController.text.trim(),
+                        phoneController.text.trim(),
                       );
                 if (success) {
                   await _loadAllData();
@@ -2346,6 +2380,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _buildKitchenToolTab(),
         _buildProcessTab(),
         _buildToolTab(),
+        _buildReminderTab(),
       ],
     );
   }
@@ -2357,6 +2392,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         title: const Text('System Management'),
         bottom: TabBar(
           controller: _tabController,
+          isScrollable: true,
           labelColor: Colors.black,
           unselectedLabelColor: Colors.black54,
           indicatorColor: Colors.black,
@@ -2369,6 +2405,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
             Tab(text: '厨具'),
             Tab(text: '工艺'),
             Tab(text: '工具'),
+            Tab(text: '提醒'),
           ],
         ),
         actions: [
@@ -2845,12 +2882,14 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                       final alias = (item['alias'] as String?)?.trim();
                       final contact = (item['contact'] as String?)?.trim();
                       final address = (item['address'] as String?)?.trim();
+                      final phone = (item['phone'] as String?)?.trim();
                       return Card(
                         child: ListTile(
                           title: Text('${item['code']} - ${item['name']}'),
                           subtitle: Text(
-                            'Alias: ${alias?.isNotEmpty == true ? alias : '-'}\n'
+                            'Alias: ${alias?.isNotEmpty == true ? alias : '-'}  '
                             'Contact: ${contact?.isNotEmpty == true ? contact : '-'}\n'
+                            'SMS Phone: ${phone?.isNotEmpty == true ? phone : '-'}\n'
                             'Address: ${address?.isNotEmpty == true ? address : '-'}',
                           ),
                           isThreeLine: true,
@@ -2882,6 +2921,133 @@ class _SystemManagementPageState extends State<SystemManagementPage>
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildReminderTab() {
+    return ListView(
+      padding: const EdgeInsets.all(20),
+      children: [
+        Text(
+          '点货短信提醒 / Stock Order SMS Reminders',
+          style: Theme.of(context).textTheme.titleLarge,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          '每次确认点货后，系统会向以下号码发送“门店 + 供应商”提醒。最多可保存 3 个号码。',
+          style: Theme.of(context).textTheme.bodyMedium,
+        ),
+        const SizedBox(height: 6),
+        Text(
+          _isSmsConfigured
+              ? 'Twilio 已配置，发送号码：${_smsFromNumber ?? '-'}'
+              : 'Twilio 尚未在服务器配置，保存号码不会立即发送短信。',
+          style: TextStyle(
+            color: _isSmsConfigured ? Colors.green : Colors.orange.shade800,
+          ),
+        ),
+        const SizedBox(height: 6),
+        const Text(
+          '注意：Twilio Trial 只能向已验证号码发送受限制的测试短信；给任意供应商发送自定义订单前，需要升级正式账户。',
+        ),
+        const SizedBox(height: 20),
+        ...List.generate(_reminderPhoneControllers.length, (index) {
+          return Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(
+              children: [
+                Expanded(
+                  child: TextField(
+                    controller: _reminderPhoneControllers[index],
+                    keyboardType: TextInputType.phone,
+                    decoration: InputDecoration(
+                      labelText: '提醒电话 ${index + 1}',
+                      hintText: '+14035551234',
+                      helperText: '请包含国家/地区代码',
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: _isSavingReminderSettings
+                      ? null
+                      : () {
+                          setState(() {
+                            final controller = _reminderPhoneControllers
+                                .removeAt(index);
+                            controller.dispose();
+                          });
+                        },
+                  icon: const Icon(Icons.delete_outline),
+                  tooltip: '删除',
+                ),
+              ],
+            ),
+          );
+        }),
+        Row(
+          children: [
+            OutlinedButton.icon(
+              onPressed:
+                  _reminderPhoneControllers.length >= 3 ||
+                      _isSavingReminderSettings
+                  ? null
+                  : () {
+                      setState(() {
+                        _reminderPhoneControllers.add(TextEditingController());
+                      });
+                    },
+              icon: const Icon(Icons.add),
+              label: const Text('增加电话'),
+            ),
+            const SizedBox(width: 12),
+            FilledButton.icon(
+              onPressed: _isSavingReminderSettings
+                  ? null
+                  : () async {
+                      final phones = _reminderPhoneControllers
+                          .map((controller) => controller.text.trim())
+                          .where((phone) => phone.isNotEmpty)
+                          .toList();
+                      if (phones.toSet().length != phones.length) {
+                        _showMessage('提醒电话不能重复');
+                        return;
+                      }
+                      if (phones.any((phone) => phone.length > 30)) {
+                        _showMessage('电话号码格式不正确');
+                        return;
+                      }
+                      setState(() {
+                        _isSavingReminderSettings = true;
+                      });
+                      try {
+                        await _systemService.updateSmsSettings(phones);
+                        if (mounted) {
+                          _showMessage('提醒设置已保存');
+                        }
+                      } catch (e) {
+                        if (mounted) {
+                          _showMessage('保存失败: $e');
+                        }
+                      } finally {
+                        if (mounted) {
+                          setState(() {
+                            _isSavingReminderSettings = false;
+                          });
+                        }
+                      }
+                    },
+              icon: _isSavingReminderSettings
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.save_outlined),
+              label: const Text('保存提醒设置'),
+            ),
+          ],
+        ),
+      ],
     );
   }
 

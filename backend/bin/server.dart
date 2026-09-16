@@ -327,9 +327,13 @@ Future<void> initDb() async {
       alias VARCHAR(255),
       address VARCHAR(255),
       contact VARCHAR(255),
+      phone VARCHAR(30),
       created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
+  await _conn.execute(
+    'ALTER TABLE suppliers ADD COLUMN IF NOT EXISTS phone VARCHAR(30)',
+  );
 
   // Create units table
   await _conn.execute('''
@@ -378,6 +382,21 @@ Future<void> initDb() async {
       parameters: ['S001', '默认门店', '系统初始化门店'],
     );
   }
+
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS sms_settings (
+      id INTEGER PRIMARY KEY CHECK (id = 1),
+      reminder_phone_1 VARCHAR(30),
+      reminder_phone_2 VARCHAR(30),
+      reminder_phone_3 VARCHAR(30),
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  await _conn.execute('''
+    INSERT INTO sms_settings (id)
+    VALUES (1)
+    ON CONFLICT (id) DO NOTHING
+  ''');
 
   // Create semi_products table
   await _conn.execute('''
@@ -716,6 +735,10 @@ String? _normalizedStoreCode(dynamic value) {
   return normalized.toUpperCase();
 }
 
+bool _isValidSmsPhone(String phone) {
+  return RegExp(r'^\+?[0-9 ()-]{7,30}$').hasMatch(phone);
+}
+
 String _normalizedUiLanguage(dynamic value) {
   final text = _normalizedOptionalString(value)?.toUpperCase();
   if (text == 'EN') {
@@ -822,6 +845,9 @@ final _router = Router()
   ..get('/api/suppliers', _getSuppliers)
   ..put('/api/suppliers/<code>', _updateSupplier)
   ..delete('/api/suppliers/<code>', _deleteSupplier)
+  // SMS reminder settings
+  ..get('/api/sms-settings', _getSmsSettings)
+  ..put('/api/sms-settings', _updateSmsSettings)
   // Units
   ..post('/api/units', _addUnit)
   ..get('/api/units', _getUnits)
@@ -865,6 +891,7 @@ final _router = Router()
   ..get('/api/stock-orders', _getStockOrders)
   ..put('/api/stock-orders/<id>', _updateStockOrder)
   ..delete('/api/stock-orders/<id>', _deleteStockOrder)
+  ..post('/api/stock-orders/<id>/send-sms', _sendStockOrderSms)
   // Kitchen Tools
   ..post('/api/kitchen-tools', _addKitchenTool)
   ..get('/api/kitchen-tools', _getKitchenTools)
@@ -2398,6 +2425,7 @@ Future<Response> _addSupplier(Request request) async {
     final alias = json['alias'] as String?;
     final address = json['address'] as String?;
     final contact = json['contact'] as String?;
+    final phone = _normalizedOptionalString(json['phone']);
 
     if (code == null || name == null) {
       return Response.badRequest(
@@ -2408,10 +2436,26 @@ Future<Response> _addSupplier(Request request) async {
         },
       );
     }
+    if (phone != null && !_isValidSmsPhone(phone)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid SMS phone number'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
 
     await _conn.execute(
-      'INSERT INTO suppliers (code, name, alias, address, contact) VALUES (\$1, \$2, \$3, \$4, \$5)',
-      parameters: [code, name, alias ?? '', address ?? '', contact ?? ''],
+      'INSERT INTO suppliers (code, name, alias, address, contact, phone) VALUES (\$1, \$2, \$3, \$4, \$5, \$6)',
+      parameters: [
+        code,
+        name,
+        alias ?? '',
+        address ?? '',
+        contact ?? '',
+        phone,
+      ],
     );
 
     return Response.ok(
@@ -2435,7 +2479,7 @@ Future<Response> _addSupplier(Request request) async {
 Future<Response> _getSuppliers(Request request) async {
   try {
     final result = await _conn.execute(
-        'SELECT code, name, alias, address, contact FROM suppliers ORDER BY created_at DESC');
+        'SELECT code, name, alias, address, contact, phone FROM suppliers ORDER BY created_at DESC');
     final suppliers = result
         .map((row) => {
               'code': row[0],
@@ -2443,6 +2487,7 @@ Future<Response> _getSuppliers(Request request) async {
               'alias': row[2],
               'address': row[3],
               'contact': row[4],
+              'phone': row[5],
             })
         .toList();
 
@@ -2472,6 +2517,7 @@ Future<Response> _updateSupplier(Request request, String code) async {
     final alias = json['alias'] as String?;
     final address = json['address'] as String?;
     final contact = json['contact'] as String?;
+    final phone = _normalizedOptionalString(json['phone']);
 
     if (name == null || name.trim().isEmpty) {
       return Response.badRequest(
@@ -2482,14 +2528,24 @@ Future<Response> _updateSupplier(Request request, String code) async {
         },
       );
     }
+    if (phone != null && !_isValidSmsPhone(phone)) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid SMS phone number'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
 
     final result = await _conn.execute(
-      'UPDATE suppliers SET name = \$1, alias = \$2, address = \$3, contact = \$4 WHERE code = \$5',
+      'UPDATE suppliers SET name = \$1, alias = \$2, address = \$3, contact = \$4, phone = \$5 WHERE code = \$6',
       parameters: [
         name.trim(),
         (alias ?? '').trim(),
         (address ?? '').trim(),
         (contact ?? '').trim(),
+        phone,
         code,
       ],
     );
@@ -2541,6 +2597,137 @@ Future<Response> _deleteSupplier(Request request, String code) async {
 
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Supplier deleted'}),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  }
+}
+
+Future<Response> _getSmsSettings(Request request) async {
+  try {
+    final scope = await _getUserScopeByUsername(
+      request.requestedUri.queryParameters['username'],
+    );
+    if (scope == null || !scope.isAdmin) {
+      return Response.forbidden(
+        jsonEncode({'error': 'Administrator access required'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+
+    final result = await _conn.execute(
+      'SELECT reminder_phone_1, reminder_phone_2, reminder_phone_3 FROM sms_settings WHERE id = 1',
+    );
+    final phones = <String>[];
+    if (result.isNotEmpty) {
+      for (final value in result.first) {
+        final phone = _normalizedOptionalString(value);
+        if (phone != null) {
+          phones.add(phone);
+        }
+      }
+    }
+
+    final accountSid = _getConfig('TWILIO_ACCOUNT_SID');
+    final authToken = _getConfig('TWILIO_AUTH_TOKEN');
+    final fromNumber = _getConfig('TWILIO_FROM_NUMBER');
+    return Response.ok(
+      jsonEncode({
+        'phones': phones,
+        'provider': 'Twilio',
+        'configured':
+            accountSid != null && authToken != null && fromNumber != null,
+        'fromNumber': fromNumber,
+      }),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  }
+}
+
+Future<Response> _updateSmsSettings(Request request) async {
+  try {
+    final body = await request.readAsString();
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    final scope =
+        await _getUserScopeByUsername(json['actorUsername'] as String?);
+    if (scope == null || !scope.isAdmin) {
+      return Response.forbidden(
+        jsonEncode({'error': 'Administrator access required'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+
+    final rawPhones = json['phones'];
+    if (rawPhones is! List) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'phones must be a list'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    final normalizedPhones =
+        rawPhones.map(_normalizedOptionalString).whereType<String>().toList();
+    final phones = normalizedPhones.toSet().toList();
+    if (normalizedPhones.length > 3 ||
+        phones.length != normalizedPhones.length ||
+        phones.any((phone) => !_isValidSmsPhone(phone))) {
+      return Response.badRequest(
+        body:
+            jsonEncode({'error': 'At most 3 valid phone numbers are allowed'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+
+    await _conn.execute(
+      '''
+      UPDATE sms_settings
+      SET reminder_phone_1 = \$1,
+          reminder_phone_2 = \$2,
+          reminder_phone_3 = \$3,
+          updated_at = CURRENT_TIMESTAMP
+      WHERE id = 1
+      ''',
+      parameters: [
+        phones.isNotEmpty ? phones[0] : null,
+        phones.length > 1 ? phones[1] : null,
+        phones.length > 2 ? phones[2] : null,
+      ],
+    );
+
+    return Response.ok(
+      jsonEncode({'success': true, 'phones': phones}),
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
@@ -4379,6 +4566,30 @@ Future<Response> _addStockOrder(Request request) async {
         },
       );
     }
+    if (scope.isAdmin && storeCode == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Administrator must select a store'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    if (storeCode != null) {
+      final store = await _conn.execute(
+        'SELECT 1 FROM stores WHERE code = \$1 LIMIT 1',
+        parameters: [storeCode],
+      );
+      if (store.isEmpty) {
+        return Response.badRequest(
+          body: jsonEncode({'error': 'Invalid store code'}),
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+        );
+      }
+    }
 
     final result = await _conn.execute(
       'INSERT INTO stock_orders (order_date, details, is_confirmed, owner_username, store_code) VALUES (\$1, \$2, \$3, \$4, \$5) RETURNING id',
@@ -4494,6 +4705,7 @@ Future<Response> _updateStockOrder(Request request, String id) async {
     final details = json['details'];
     final hasIsConfirmed = json.containsKey('isConfirmed');
     final isConfirmed = json['isConfirmed'] == true;
+    final requestedStoreCode = _normalizedStoreCode(json['storeCode']);
 
     if (details == null) {
       return Response.badRequest(
@@ -4506,7 +4718,7 @@ Future<Response> _updateStockOrder(Request request, String id) async {
     }
 
     final existing = await _conn.execute(
-      'SELECT owner_username FROM stock_orders WHERE id = \$1 AND is_deleted = FALSE',
+      'SELECT owner_username, store_code FROM stock_orders WHERE id = \$1 AND is_deleted = FALSE',
       parameters: [int.parse(id)],
     );
     if (existing.isEmpty) {
@@ -4528,14 +4740,45 @@ Future<Response> _updateStockOrder(Request request, String id) async {
       );
     }
 
+    final storeCode = scope.isAdmin ? requestedStoreCode : scope.storeCode;
+    if (scope.isAdmin && storeCode == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Administrator must select a store'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    if (storeCode != null) {
+      final store = await _conn.execute(
+        'SELECT 1 FROM stores WHERE code = \$1 LIMIT 1',
+        parameters: [storeCode],
+      );
+      if (store.isEmpty) {
+        return Response.badRequest(
+          body: jsonEncode({'error': 'Invalid store code'}),
+          headers: {
+            'Content-Type': 'application/json',
+            'Access-Control-Allow-Origin': '*'
+          },
+        );
+      }
+    }
+
     final result = hasIsConfirmed
         ? await _conn.execute(
-            'UPDATE stock_orders SET details = \$1, is_confirmed = \$2 WHERE id = \$3 AND is_deleted = FALSE',
-            parameters: [jsonEncode(details), isConfirmed, int.parse(id)],
+            'UPDATE stock_orders SET details = \$1, is_confirmed = \$2, store_code = \$3 WHERE id = \$4 AND is_deleted = FALSE',
+            parameters: [
+              jsonEncode(details),
+              isConfirmed,
+              storeCode,
+              int.parse(id),
+            ],
           )
         : await _conn.execute(
-            'UPDATE stock_orders SET details = \$1 WHERE id = \$2 AND is_deleted = FALSE',
-            parameters: [jsonEncode(details), int.parse(id)],
+            'UPDATE stock_orders SET details = \$1, store_code = \$2 WHERE id = \$3 AND is_deleted = FALSE',
+            parameters: [jsonEncode(details), storeCode, int.parse(id)],
           );
 
     if (result.affectedRows == 0) {
@@ -4550,6 +4793,236 @@ Future<Response> _updateStockOrder(Request request, String id) async {
 
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Stock order updated'}),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      },
+    );
+  }
+}
+
+int _stockOrderQuantity(dynamic value) {
+  if (value is int) return value;
+  if (value is num) return value.round();
+  return double.tryParse(value?.toString() ?? '')?.round() ?? 0;
+}
+
+bool _isSelectedStockOrderItem(Map<String, dynamic> item) {
+  final quantity = _stockOrderQuantity(item['orderQuantity']);
+  if (quantity <= 0) return false;
+  final categorySelected = item['categorySelected'];
+  if (categorySelected is bool) return categorySelected;
+  final legacyOrderToday = item['orderToday'];
+  if (legacyOrderToday is bool) return legacyOrderToday;
+  return true;
+}
+
+Future<Map<String, dynamic>> _sendTwilioMessage(
+  String phone,
+  String message,
+) async {
+  final accountSid = _getConfig('TWILIO_ACCOUNT_SID');
+  final authToken = _getConfig('TWILIO_AUTH_TOKEN');
+  final fromNumber = _getConfig('TWILIO_FROM_NUMBER');
+  if (accountSid == null || authToken == null || fromNumber == null) {
+    return {
+      'phone': phone,
+      'success': false,
+      'error': 'Twilio is not configured on the server',
+    };
+  }
+
+  final client = HttpClient()..connectionTimeout = const Duration(seconds: 10);
+  try {
+    final request = await client.postUrl(
+      Uri.parse(
+        'https://api.twilio.com/2010-04-01/Accounts/$accountSid/Messages.json',
+      ),
+    );
+    request.headers.set(
+      HttpHeaders.authorizationHeader,
+      'Basic ${base64Encode(utf8.encode('$accountSid:$authToken'))}',
+    );
+    request.headers.contentType = ContentType(
+      'application',
+      'x-www-form-urlencoded',
+      charset: 'utf-8',
+    );
+    request.write(
+      Uri(
+        queryParameters: {
+          'To': phone,
+          'From': fromNumber,
+          'Body': message,
+        },
+      ).query,
+    );
+    final response = await request.close().timeout(const Duration(seconds: 20));
+    final responseBody = await utf8.decoder.bind(response).join();
+    final data = jsonDecode(responseBody) as Map<String, dynamic>;
+    return {
+      'phone': phone,
+      'success': response.statusCode == 201,
+      'error': data['message'] ?? data['error_message'],
+      'messageSid': data['sid'],
+      'status': data['status'],
+    };
+  } catch (e) {
+    return {'phone': phone, 'success': false, 'error': e.toString()};
+  } finally {
+    client.close(force: true);
+  }
+}
+
+Future<Response> _sendStockOrderSms(Request request, String id) async {
+  try {
+    final body = await request.readAsString();
+    final json = jsonDecode(body) as Map<String, dynamic>;
+    final scope =
+        await _getUserScopeByUsername(json['actorUsername'] as String?);
+    if (scope == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing or invalid actorUsername'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+
+    final orderResult = await _conn.execute(
+      '''
+      SELECT so.details, so.is_confirmed, so.owner_username, so.store_code,
+             COALESCE(s.name, so.store_code, 'Unknown Store')
+      FROM stock_orders so
+      LEFT JOIN stores s ON s.code = so.store_code
+      WHERE so.id = \$1 AND so.is_deleted = FALSE
+      ''',
+      parameters: [int.parse(id)],
+    );
+    if (orderResult.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Stock order not found'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    final row = orderResult.first;
+    if (!_canAccessOwnedRecord(scope, row[2] as String?)) {
+      return Response.forbidden(
+        jsonEncode({'error': 'No permission to send this stock order'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+    if (row[1] != true) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Stock order must be confirmed first'}),
+        headers: {
+          'Content-Type': 'application/json',
+          'Access-Control-Allow-Origin': '*'
+        },
+      );
+    }
+
+    dynamic decodedDetails;
+    try {
+      decodedDetails = jsonDecode(row[0] as String? ?? '[]');
+    } catch (_) {
+      decodedDetails = const [];
+    }
+    final details = decodedDetails is List
+        ? decodedDetails
+            .whereType<Map>()
+            .map((item) => Map<String, dynamic>.from(item))
+            .where(_isSelectedStockOrderItem)
+            .toList()
+        : <Map<String, dynamic>>[];
+    final storeName = row[4] as String? ?? 'Unknown Store';
+    final supplierGroups = <String, List<Map<String, dynamic>>>{};
+    for (final item in details) {
+      final primary = _normalizedOptionalString(item['primarySupplierCode']);
+      final secondary =
+          _normalizedOptionalString(item['secondarySupplierCode']);
+      final supplierCode = primary ?? secondary ?? 'UNKNOWN';
+      supplierGroups.putIfAbsent(supplierCode, () => []).add(item);
+    }
+
+    final settings = await _conn.execute(
+      'SELECT reminder_phone_1, reminder_phone_2, reminder_phone_3 FROM sms_settings WHERE id = 1',
+    );
+    final reminderPhones = <String>[];
+    if (settings.isNotEmpty) {
+      for (final value in settings.first) {
+        final phone = _normalizedOptionalString(value);
+        if (phone != null) reminderPhones.add(phone);
+      }
+    }
+
+    final sendSupplierSms = json['sendSupplierSms'] == true;
+    final results = <Map<String, dynamic>>[];
+    for (final entry in supplierGroups.entries) {
+      final supplier = await _conn.execute(
+        'SELECT name, phone FROM suppliers WHERE code = \$1 LIMIT 1',
+        parameters: [entry.key],
+      );
+      final supplierName = supplier.isNotEmpty
+          ? (supplier.first[0] as String? ?? entry.key)
+          : ((entry.value.first['primarySupplierName'] ??
+                  entry.value.first['secondarySupplierName'] ??
+                  entry.key)
+              .toString());
+      final supplierPhone = supplier.isNotEmpty
+          ? _normalizedOptionalString(supplier.first[1])
+          : null;
+
+      if (sendSupplierSms && supplierPhone != null) {
+        final itemLines = entry.value.map((item) {
+          final cn = _normalizedOptionalString(item['nameCN']);
+          final en = _normalizedOptionalString(item['nameEN']);
+          final name = cn != null && en != null
+              ? '$cn / $en'
+              : (cn ?? en ?? item['code']?.toString() ?? '-');
+          return '$name × ${_stockOrderQuantity(item['orderQuantity'])}';
+        }).join('\n');
+        results.add(
+          await _sendTwilioMessage(
+            supplierPhone,
+            '$storeName 订货 / Order from $storeName\n$itemLines\nReply STOP to opt out.',
+          ),
+        );
+      }
+
+      final reminder =
+          '$storeName 已向 $supplierName 订货 / $storeName placed an order with $supplierName. Reply STOP to opt out.';
+      for (final phone in reminderPhones) {
+        results.add(await _sendTwilioMessage(phone, reminder));
+      }
+    }
+
+    final sent = results.where((result) => result['success'] == true).length;
+    final failures =
+        results.where((result) => result['success'] != true).toList();
+    return Response.ok(
+      jsonEncode({
+        'success': failures.isEmpty,
+        'attempted': results.length,
+        'sent': sent,
+        'failed': failures.length,
+        'failures': failures,
+      }),
       headers: {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'

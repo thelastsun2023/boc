@@ -19,6 +19,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
   final SystemService _service = SystemService();
   final List<Map<String, dynamic>> _orders = [];
   final List<Map<String, dynamic>> _rawMaterials = [];
+  final List<Map<String, dynamic>> _stores = [];
+  final List<Map<String, dynamic>> _suppliers = [];
   final Map<String, ScrollController> _tabScrollControllers = {};
   final Set<int> _processingOrderIds = <int>{};
   bool _isLoading = true;
@@ -67,6 +69,8 @@ class _StockOrderPageState extends State<StockOrderPage> {
       }
       final materials = await _service.getRawMaterials();
       final orders = await _service.getStockOrders();
+      final stores = await _service.getStores();
+      final suppliers = await _service.getSuppliers();
       if (!mounted) return;
       setState(() {
         _rawMaterials
@@ -75,6 +79,12 @@ class _StockOrderPageState extends State<StockOrderPage> {
         _orders
           ..clear()
           ..addAll(orders);
+        _stores
+          ..clear()
+          ..addAll(stores);
+        _suppliers
+          ..clear()
+          ..addAll(suppliers);
         _isLoading = false;
       });
     } catch (e) {
@@ -114,6 +124,26 @@ class _StockOrderPageState extends State<StockOrderPage> {
       return legacyOrderToday && _toInt(item['orderQuantity']) > 0;
     }
     return _toInt(item['orderQuantity']) > 0;
+  }
+
+  String? _supplierCodeForItem(Map<String, dynamic> item) {
+    final primary = (item['primarySupplierCode'] as String?)?.trim();
+    if (primary?.isNotEmpty == true) return primary;
+    final secondary = (item['secondarySupplierCode'] as String?)?.trim();
+    return secondary?.isNotEmpty == true ? secondary : null;
+  }
+
+  bool _hasSupplierSmsRecipient(Iterable<Map<String, dynamic>> items) {
+    final supplierPhones = <String, String>{
+      for (final supplier in _suppliers)
+        if ((supplier['phone'] as String?)?.trim().isNotEmpty == true)
+          (supplier['code'] as String? ?? '').trim():
+              (supplier['phone'] as String).trim(),
+    };
+    return items.any((item) {
+      final code = _supplierCodeForItem(item);
+      return code != null && supplierPhones.containsKey(code);
+    });
   }
 
   String _formatDate(String value) {
@@ -218,6 +248,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
         : DateTime.now();
     bool isConfirmed = order?['isConfirmed'] == true;
     bool isSubmitting = false;
+    bool sendSupplierSms = false;
+    final session = SessionService();
+    final existingStoreCode = (order?['storeCode'] as String?)?.trim();
+    String? selectedStoreCode = session.isAdmin
+        ? (_stores.any((store) => store['code'] == existingStoreCode)
+              ? existingStoreCode
+              : null)
+        : session.storeCode;
 
     final List<Map<String, dynamic>> items = [];
 
@@ -300,13 +338,56 @@ class _StockOrderPageState extends State<StockOrderPage> {
               ),
               content: SizedBox(
                 width: 920,
-                height: 560,
+                height: 620,
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
                       '${_t('点货日期', 'Order Date')}: ${_formatDate(orderDate.toIso8601String())}',
                     ),
+                    if (session.isAdmin) ...[
+                      const SizedBox(height: 12),
+                      DropdownButtonFormField<String>(
+                        initialValue: selectedStoreCode,
+                        decoration: InputDecoration(
+                          labelText: _t('订货门店 *', 'Store *'),
+                        ),
+                        items: _stores.map((store) {
+                          final code = store['code'] as String? ?? '';
+                          final name = store['name'] as String? ?? code;
+                          return DropdownMenuItem(
+                            value: code,
+                            child: Text('$name ($code)'),
+                          );
+                        }).toList(),
+                        onChanged: isSubmitting
+                            ? null
+                            : (value) {
+                                setDialogState(() {
+                                  selectedStoreCode = value;
+                                });
+                              },
+                      ),
+                    ],
+                    if (_hasSupplierSmsRecipient(
+                      items.where(_isSelectedOrderItem),
+                    ))
+                      CheckboxListTile(
+                        contentPadding: EdgeInsets.zero,
+                        dense: true,
+                        value: sendSupplierSms,
+                        title: Text(
+                          _t(
+                            '同时把订单短信发送给有电话号码的供应商',
+                            'Also text the order to suppliers with a phone number',
+                          ),
+                        ),
+                        onChanged: (value) {
+                          setDialogState(() {
+                            sendSupplierSms = value == true;
+                          });
+                        },
+                      ),
                     const SizedBox(height: 12),
                     Expanded(
                       child: items.isEmpty
@@ -530,6 +611,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
                   onPressed: isConfirmed || isSubmitting
                       ? null
                       : () async {
+                          if (session.isAdmin && selectedStoreCode == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(_t('请选择订货门店', 'Select a store')),
+                              ),
+                            );
+                            return;
+                          }
                           setDialogState(() {
                             isSubmitting = true;
                           });
@@ -587,6 +676,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 order['id'] as int,
                                 details,
                                 false,
+                                storeCode: selectedStoreCode,
                               );
                             } else {
                               final createdOrderId = await _service
@@ -594,6 +684,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                     orderDateString,
                                     details,
                                     false,
+                                    storeCode: selectedStoreCode,
                                   );
                               if (createdOrderId == null) {
                                 throw Exception(
@@ -644,6 +735,14 @@ class _StockOrderPageState extends State<StockOrderPage> {
                   onPressed: isSubmitting
                       ? null
                       : () async {
+                          if (session.isAdmin && selectedStoreCode == null) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text(_t('请选择订货门店', 'Select a store')),
+                              ),
+                            );
+                            return;
+                          }
                           setDialogState(() {
                             isSubmitting = true;
                           });
@@ -703,6 +802,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 orderId,
                                 details,
                                 true,
+                                storeCode: selectedStoreCode,
                               );
                             } else {
                               final createdOrderId = await _service
@@ -710,6 +810,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                     orderDateString,
                                     details,
                                     true,
+                                    storeCode: selectedStoreCode,
                                   );
                               if (createdOrderId == null) {
                                 throw Exception(
@@ -726,6 +827,11 @@ class _StockOrderPageState extends State<StockOrderPage> {
                               orderId,
                               orderDate,
                               selectedItems,
+                              selectedStoreCode,
+                            );
+                            await _sendSmsAndShowResult(
+                              orderId,
+                              sendSupplierSms: sendSupplierSms,
                             );
                             isConfirmed = true;
 
@@ -766,6 +872,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
     int stockOrderId,
     DateTime orderDate,
     List<Map<String, dynamic>> selectedItems,
+    String? storeCode,
   ) async {
     if (selectedItems.isEmpty) {
       final existingTasks = await _service.getTodoTasks(
@@ -878,6 +985,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           stockOrderId: stockOrderId,
           supplierCode: supplierCode,
           taskType: 'stock_order',
+          storeCode: storeCode,
         );
         continue;
       }
@@ -895,6 +1003,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
         stockOrderId: stockOrderId,
         supplierCode: supplierCode,
         taskType: 'stock_order',
+        storeCode: storeCode,
       );
     }
 
@@ -945,6 +1054,43 @@ class _StockOrderPageState extends State<StockOrderPage> {
     }
   }
 
+  Future<void> _sendSmsAndShowResult(
+    int orderId, {
+    required bool sendSupplierSms,
+  }) async {
+    try {
+      final result = await _service.sendStockOrderSms(
+        orderId,
+        sendSupplierSms: sendSupplierSms,
+      );
+      final attempted = _toInt(result['attempted']);
+      final sent = _toInt(result['sent']);
+      final failed = _toInt(result['failed']);
+      if (!mounted || attempted == 0) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            failed == 0
+                ? _t('短信已发送 $sent 条', '$sent SMS message(s) sent')
+                : _t(
+                    '短信发送完成：成功 $sent 条，失败 $failed 条',
+                    'SMS complete: $sent sent, $failed failed',
+                  ),
+          ),
+        ),
+      );
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${_t('点货已确认，但短信发送失败', 'Order confirmed, but SMS failed')}: $e',
+          ),
+        ),
+      );
+    }
+  }
+
   Future<void> _confirmOrder(Map<String, dynamic> order) async {
     final orderId = _toInt(order['id']);
     if (_processingOrderIds.contains(orderId)) {
@@ -968,26 +1114,86 @@ class _StockOrderPageState extends State<StockOrderPage> {
       return;
     }
 
+    bool sendSupplierSms = false;
+    final hasSupplierPhone = _hasSupplierSmsRecipient(selectedItems);
+    final session = SessionService();
+    final existingStoreCode = (order['storeCode'] as String?)?.trim();
+    String? selectedStoreCode = session.isAdmin
+        ? (_stores.any((store) => store['code'] == existingStoreCode)
+              ? existingStoreCode
+              : null)
+        : session.storeCode;
     final confirmed = await showDialog<bool>(
       context: context,
-      builder: (context) => AlertDialog(
-        title: Text(_t('确认生成任务', 'Confirm Task Creation')),
-        content: Text(
-          _t(
-            '确认后会按供应商同步任务，后续仍可编辑并再次更新任务。',
-            'Tasks will be created by supplier. You can edit and update them later.',
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(_t('确认生成任务', 'Confirm Task Creation')),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                _t(
+                  '确认后会按供应商同步任务，并向系统设置中的电话发送提醒。',
+                  'Tasks will be synced by supplier and reminder phones will be notified.',
+                ),
+              ),
+              if (session.isAdmin) ...[
+                const SizedBox(height: 12),
+                DropdownButtonFormField<String>(
+                  initialValue: selectedStoreCode,
+                  decoration: InputDecoration(
+                    labelText: _t('订货门店 *', 'Store *'),
+                  ),
+                  items: _stores.map((store) {
+                    final code = store['code'] as String? ?? '';
+                    final name = store['name'] as String? ?? code;
+                    return DropdownMenuItem(
+                      value: code,
+                      child: Text('$name ($code)'),
+                    );
+                  }).toList(),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      selectedStoreCode = value;
+                    });
+                  },
+                ),
+              ],
+              if (hasSupplierPhone)
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: sendSupplierSms,
+                  title: Text(
+                    _t('把订单短信发送给供应商', 'Text the order to the supplier'),
+                  ),
+                  onChanged: (value) {
+                    setDialogState(() {
+                      sendSupplierSms = value == true;
+                    });
+                  },
+                ),
+            ],
           ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(context).pop(false),
+              child: Text(_t('取消', 'Cancel')),
+            ),
+            FilledButton(
+              onPressed: () {
+                if (session.isAdmin && selectedStoreCode == null) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(content: Text(_t('请选择订货门店', 'Select a store'))),
+                  );
+                  return;
+                }
+                Navigator.of(context).pop(true);
+              },
+              child: Text(_t('确认', 'Confirm')),
+            ),
+          ],
         ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(false),
-            child: Text(_t('取消', 'Cancel')),
-          ),
-          FilledButton(
-            onPressed: () => Navigator.of(context).pop(true),
-            child: Text(_t('确认', 'Confirm')),
-          ),
-        ],
       ),
     );
     if (confirmed != true) return;
@@ -998,12 +1204,19 @@ class _StockOrderPageState extends State<StockOrderPage> {
           _processingOrderIds.add(orderId);
         });
       }
-      await _service.updateStockOrder(orderId, details, true);
+      await _service.updateStockOrder(
+        orderId,
+        details,
+        true,
+        storeCode: selectedStoreCode,
+      );
       await _syncTodoTasksForOrder(
         orderId,
         DateTime.parse(order['orderDate'] as String),
         selectedItems,
+        selectedStoreCode,
       );
+      await _sendSmsAndShowResult(orderId, sendSupplierSms: sendSupplierSms);
       await _loadData();
     } catch (e) {
       if (mounted) {
