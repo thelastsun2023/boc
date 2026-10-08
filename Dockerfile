@@ -1,5 +1,5 @@
 # Flutter web build stage
-FROM ghcr.io/cirruslabs/flutter:stable AS flutter_builder
+FROM ghcr.io/cirruslabs/flutter:3.38.5 AS flutter_builder
 
 WORKDIR /flutter
 
