@@ -1,3 +1,4 @@
+import '../widgets/product_image.dart';
 import 'package:flutter/material.dart';
 
 import '../services/browser_print.dart';
@@ -162,6 +163,7 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
   }
 
   List<DataColumn> get _columns => const [
+    DataColumn(label: Text('图片 / Image')),
     DataColumn(label: Text('编号')),
     DataColumn(label: Text('名称')),
     DataColumn(label: Text('规格')),
@@ -186,6 +188,14 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
       );
       return DataRow(
         cells: [
+          DataCell(
+            ProductImage(
+              url: item['imageUrl'] as String?,
+              title: displayName,
+              width: 44,
+              height: 44,
+            ),
+          ),
           DataCell(Text(code)),
           DataCell(Text(displayName)),
           DataCell(Text(spec)),

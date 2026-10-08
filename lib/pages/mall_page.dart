@@ -1,3 +1,4 @@
+import '../widgets/product_image.dart';
 import 'dart:convert';
 import 'dart:math';
 import 'package:flutter/material.dart';
@@ -5,7 +6,6 @@ import '../services/mall_service.dart';
 import '../services/session_service.dart';
 import '../services/system_service.dart';
 import '../services/browser_print.dart';
-import '../services/api_base_url.dart';
 
 class MallPage extends StatefulWidget {
   const MallPage({super.key, this.initialTab = 0});
@@ -328,29 +328,11 @@ class _MallPageState extends State<MallPage> {
     final code = p['code'] as String;
     final quantity = selectedQuantities[code] ?? 0;
     final image = p['imagePath'] as String?;
-    final picture = Container(
+    final picture = ProductImage(
+      url: image,
+      title: _productName(p),
       width: tiled ? double.infinity : 80,
       height: tiled ? 150 : 80,
-      decoration: BoxDecoration(
-        color: Colors.grey.shade100,
-        borderRadius: BorderRadius.circular(8),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: image != null && image.isNotEmpty
-          ? Image.network(
-              Uri.parse(getBaseUrl()).resolve(image).toString(),
-              fit: BoxFit.contain,
-              errorBuilder: (_, error, stack) => const Icon(
-                Icons.inventory_2_outlined,
-                size: 48,
-                color: Colors.grey,
-              ),
-            )
-          : const Icon(
-              Icons.inventory_2_outlined,
-              size: 48,
-              color: Colors.grey,
-            ),
     );
     final details = Column(
       crossAxisAlignment: CrossAxisAlignment.start,

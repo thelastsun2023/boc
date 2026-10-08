@@ -1,3 +1,4 @@
+import '../widgets/mall_navigation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
@@ -23,6 +24,7 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   int _selectedIndex = 0;
+  int _mallTab = 0;
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
@@ -82,7 +84,12 @@ class _AdminPageState extends State<AdminPage> {
       'label': _t('用户管理', 'User Management'),
       'page': const UserManagementPage(),
     },
-    {'index': 9, 'icon': Icons.storefront, 'label': _t('商城与采购订单', 'Mall & Orders'), 'page': const MallPage()},
+    {
+      'index': 9,
+      'icon': Icons.storefront,
+      'label': _t('商城与采购订单', 'Mall & Orders'),
+      'page': MallPage(key: ValueKey(_mallTab), initialTab: _mallTab),
+    },
   ];
 
   void _logout() {
@@ -161,6 +168,17 @@ class _AdminPageState extends State<AdminPage> {
                     itemCount: menuItems.length,
                     itemBuilder: (context, index) {
                       final item = menuItems[index];
+                      if (item['index'] == 9) {
+                        return MallNavigation(
+                          collapsed: _isSidebarCollapsed,
+                          selected: _selectedIndex == 9,
+                          tab: _mallTab,
+                          onSelected: (tab) => setState(() {
+                            _selectedIndex = 9;
+                            _mallTab = tab;
+                          }),
+                        );
+                      }
                       final isSelected = _selectedIndex == item['index'];
                       return Container(
                         color: isSelected

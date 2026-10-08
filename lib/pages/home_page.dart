@@ -1,3 +1,4 @@
+import '../widgets/mall_navigation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
@@ -15,6 +16,7 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
+  int _mallTab = 0;
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
@@ -37,7 +39,7 @@ class _HomePageState extends State<HomePage> {
         'index': 2,
         'icon': Icons.storefront,
         'label': _t('商城与采购', 'Mall & Procurement'),
-        'page': const MallPage(),
+        'page': MallPage(key: ValueKey(_mallTab), initialTab: _mallTab),
       },
   ];
 
@@ -117,6 +119,17 @@ class _HomePageState extends State<HomePage> {
                     itemCount: menuItems.length,
                     itemBuilder: (context, index) {
                       final item = menuItems[index];
+                      if (item['index'] == 2) {
+                        return MallNavigation(
+                          collapsed: _isSidebarCollapsed,
+                          selected: _selectedIndex == 2,
+                          tab: _mallTab,
+                          onSelected: (tab) => setState(() {
+                            _selectedIndex = 2;
+                            _mallTab = tab;
+                          }),
+                        );
+                      }
                       final isSelected = _selectedIndex == item['index'];
                       return Container(
                         color: isSelected

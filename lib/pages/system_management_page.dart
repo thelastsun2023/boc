@@ -1,3 +1,4 @@
+import '../widgets/product_image.dart';
 import 'dart:typed_data';
 
 import 'package:crop_your_image/crop_your_image.dart';
@@ -2757,40 +2758,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              imageBytes != null
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Image.memory(
-                                        imageBytes,
-                                        width: 64,
-                                        height: 64,
-                                        fit: BoxFit.cover,
-                                      ),
-                                    )
-                                  : imageUrl != null && imageUrl.isNotEmpty
-                                  ? ClipRRect(
-                                      borderRadius: BorderRadius.circular(4),
-                                      child: Image.network(
-                                        _displayImageUrl(imageUrl),
-                                        width: 64,
-                                        height: 64,
-                                        fit: BoxFit.cover,
-                                        errorBuilder:
-                                            (context, error, stackTrace) =>
-                                                const SizedBox(
-                                                  width: 64,
-                                                  height: 64,
-                                                  child: Icon(
-                                                    Icons.broken_image,
-                                                  ),
-                                                ),
-                                      ),
-                                    )
-                                  : const SizedBox(
-                                      width: 64,
-                                      height: 64,
-                                      child: Icon(Icons.inventory_2_outlined),
-                                    ),
+                              ProductImage(
+                                url: imageUrl,
+                                bytes: imageBytes,
+                                title: displayName,
+                              ),
                               const SizedBox(width: 12),
                               Expanded(
                                 child: Column(
