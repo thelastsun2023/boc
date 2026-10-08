@@ -11,8 +11,13 @@ import '../services/system_service.dart';
 
 class SystemManagementPage extends StatefulWidget {
   final int initialTabIndex;
+  final int initialAction;
 
-  const SystemManagementPage({super.key, this.initialTabIndex = 0});
+  const SystemManagementPage({
+    super.key,
+    this.initialTabIndex = 0,
+    this.initialAction = 0,
+  });
 
   @override
   State<SystemManagementPage> createState() => _SystemManagementPageState();
@@ -179,6 +184,16 @@ class _SystemManagementPageState extends State<SystemManagementPage>
     return options;
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadAllData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showRawMaterialCategoriesManager();
+      if (widget.initialAction == 2) _showRawMaterialLocationsManager();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
@@ -188,7 +203,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       vsync: this,
       initialIndex: initialIndex,
     );
-    _loadAllData();
+    _openInitialAction();
   }
 
   @override

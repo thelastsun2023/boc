@@ -4,7 +4,8 @@ import '../services/menu_service.dart';
 import '../services/session_service.dart';
 
 class MenuManagementPage extends StatefulWidget {
-  const MenuManagementPage({super.key});
+  const MenuManagementPage({super.key, this.initialTabIndex = 0});
+  final int initialTabIndex;
 
   @override
   State<MenuManagementPage> createState() => _MenuManagementPageState();
@@ -47,7 +48,11 @@ class _MenuManagementPageState extends State<MenuManagementPage>
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: 2,
+      vsync: this,
+      initialIndex: widget.initialTabIndex.clamp(0, 1),
+    );
     _loadAllData();
   }
 

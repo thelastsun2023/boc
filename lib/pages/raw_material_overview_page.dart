@@ -6,7 +6,9 @@ import '../services/session_service.dart';
 import '../services/system_service.dart';
 
 class RawMaterialOverviewPage extends StatefulWidget {
-  const RawMaterialOverviewPage({super.key});
+  const RawMaterialOverviewPage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<RawMaterialOverviewPage> createState() =>
@@ -37,10 +39,19 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
     return _isEnglish ? '$en / $cn' : '$cn / $en';
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _printPage();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _openInitialAction();
   }
 
   @override

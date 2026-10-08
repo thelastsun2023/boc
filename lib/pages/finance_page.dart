@@ -21,7 +21,9 @@ const List<String> _expensePaymentMethods = [
 ];
 
 class FinancePage extends StatefulWidget {
-  const FinancePage({super.key});
+  const FinancePage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<FinancePage> createState() => _FinancePageState();
@@ -148,10 +150,20 @@ class _FinancePageState extends State<FinancePage> {
     return markers;
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadRecords();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showRecordDialog();
+      if (widget.initialAction == 2) _exportRecords();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadRecords();
+    _openInitialAction();
   }
 
   @override

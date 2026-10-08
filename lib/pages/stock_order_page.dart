@@ -9,7 +9,13 @@ import '../services/system_service.dart';
 class StockOrderPage extends StatefulWidget {
   final bool showAppBar;
 
-  const StockOrderPage({super.key, this.showAppBar = true});
+  const StockOrderPage({
+    super.key,
+    this.showAppBar = true,
+    this.initialAction = 0,
+  });
+
+  final int initialAction;
 
   @override
   State<StockOrderPage> createState() => _StockOrderPageState();
@@ -38,10 +44,19 @@ class _StockOrderPageState extends State<StockOrderPage> {
     }).toList();
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showOrderDialog();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _openInitialAction();
   }
 
   ScrollController _controllerForCategory(String category) {

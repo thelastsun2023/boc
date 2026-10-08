@@ -6,7 +6,9 @@ import '../services/system_service.dart';
 import 'mall_page.dart';
 
 class TodoPage extends StatefulWidget {
-  const TodoPage({super.key});
+  const TodoPage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<TodoPage> createState() => _TodoPageState();
@@ -23,10 +25,19 @@ class _TodoPageState extends State<TodoPage> {
 
   static const List<String> _statusOptions = ['未做完', '已做完', '有问题'];
 
+  Future<void> _openInitialAction() async {
+    await _loadTasks();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showTaskDialog();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadTasks();
+    _openInitialAction();
   }
 
   Future<void> _loadTasks() async {
@@ -145,7 +156,9 @@ class _TodoPageState extends State<TodoPage> {
 
   Future<void> _showTaskDialog({Map<String, dynamic>? task}) async {
     if (task?['taskType'] == 'MALL_ORDER') {
-      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MallPage(initialTab: 1)));
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const MallPage(initialTab: 1)));
       await _loadTasks();
       return;
     }
@@ -409,7 +422,7 @@ class _TodoPageState extends State<TodoPage> {
                         final ownerUsername = (task['ownerUsername'] as String?)
                             ?.trim();
                         final storeCode =
-                          (task['storeCode'] as String?)?.trim() ?? '';
+                            (task['storeCode'] as String?)?.trim() ?? '';
                         final status = task['status'] as String? ?? '未做完';
                         return Card(
                           color: _statusCardColor(status),

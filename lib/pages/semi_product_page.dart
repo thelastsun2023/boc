@@ -10,7 +10,9 @@ import '../services/session_service.dart';
 import '../services/system_service.dart';
 
 class SemiProductPage extends StatefulWidget {
-  const SemiProductPage({super.key});
+  const SemiProductPage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<SemiProductPage> createState() => _SemiProductPageState();
@@ -105,10 +107,20 @@ class _SemiProductPageState extends State<SemiProductPage> {
     return options;
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadAllData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showSemiProductDialog();
+      if (widget.initialAction == 2) _showSemiProductCategoriesManager();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadAllData();
+    _openInitialAction();
   }
 
   Future<void> _loadAllData() async {

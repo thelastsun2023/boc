@@ -7,7 +7,9 @@ import '../services/system_service.dart';
 enum StockChecklistPeriod { weekday, weekend, holiday }
 
 class SemiProductStockCheckPage extends StatefulWidget {
-  const SemiProductStockCheckPage({super.key});
+  const SemiProductStockCheckPage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<SemiProductStockCheckPage> createState() =>
@@ -24,10 +26,20 @@ class _SemiProductStockCheckPageState extends State<SemiProductStockCheckPage> {
   String? _error;
   StockChecklistPeriod _selectedPeriod = StockChecklistPeriod.weekday;
 
+  Future<void> _openInitialAction() async {
+    await _loadData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showCheckDialog();
+      if (widget.initialAction == 2) _printChecklist();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _openInitialAction();
   }
 
   Future<void> _loadData() async {

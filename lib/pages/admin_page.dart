@@ -1,4 +1,4 @@
-import '../widgets/mall_navigation.dart';
+import '../widgets/section_navigation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
@@ -24,7 +24,8 @@ class AdminPage extends StatefulWidget {
 
 class _AdminPageState extends State<AdminPage> {
   int _selectedIndex = 0;
-  int _mallTab = 0;
+  final _sectionTabs = <int, int>{};
+  final _sectionKeys = <int, int>{};
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
@@ -34,63 +35,134 @@ class _AdminPageState extends State<AdminPage> {
       'index': 0,
       'icon': Icons.dashboard,
       'label': _t('系统管理', 'System Management'),
-      'page': const SystemManagementPage(),
+      'page': SystemManagementPage(
+        key: ValueKey(_sectionKeys[0] ?? 0),
+        initialTabIndex: (_sectionTabs[0] ?? 0) < 9
+            ? (_sectionTabs[0] ?? 0)
+            : 0,
+        initialAction: (_sectionTabs[0] ?? 0) >= 9 ? (_sectionTabs[0]! - 8) : 0,
+      ),
     },
     {
       'index': 1,
       'icon': Icons.restaurant_menu,
       'label': _t('菜单管理', 'Menu Management'),
-      'page': const MenuManagementPage(),
+      'page': MenuManagementPage(
+        key: ValueKey(_sectionTabs[1] ?? 0),
+        initialTabIndex: _sectionTabs[1] ?? 0,
+      ),
     },
     {
       'index': 2,
       'icon': Icons.inventory_2,
       'label': _t('原材料一览', 'Raw Material Overview'),
-      'page': const RawMaterialOverviewPage(),
+      'page': RawMaterialOverviewPage(
+        key: ValueKey(_sectionKeys[2] ?? 0),
+        initialAction: _sectionTabs[2] ?? 0,
+      ),
     },
     {
       'index': 3,
       'icon': Icons.layers,
       'label': _t('半成品', 'Semi Product'),
-      'page': const SemiProductPage(),
+      'page': SemiProductPage(
+        key: ValueKey(_sectionKeys[3] ?? 0),
+        initialAction: _sectionTabs[3] ?? 0,
+      ),
     },
     {
       'index': 4,
       'icon': Icons.fact_check,
       'label': _t('半成品存量检查', 'Semi Product Stock Check'),
-      'page': const SemiProductStockCheckPage(),
+      'page': SemiProductStockCheckPage(
+        key: ValueKey(_sectionKeys[4] ?? 0),
+        initialAction: _sectionTabs[4] ?? 0,
+      ),
     },
     {
       'index': 5,
       'icon': Icons.account_balance_wallet,
       'label': _t('财务', 'Finance'),
-      'page': const FinancePage(),
+      'page': FinancePage(
+        key: ValueKey(_sectionKeys[5] ?? 0),
+        initialAction: _sectionTabs[5] ?? 0,
+      ),
     },
     {
       'index': 6,
       'icon': Icons.shopping_cart_checkout,
       'label': _t('点货', 'Stock Order'),
-      'page': const StockOrderPage(),
+      'page': StockOrderPage(
+        key: ValueKey(_sectionKeys[6] ?? 0),
+        initialAction: _sectionTabs[6] ?? 0,
+      ),
     },
     {
       'index': 7,
       'icon': Icons.task_alt,
       'label': _t('待办事项', 'Todo'),
-      'page': const TodoPage(),
+      'page': TodoPage(
+        key: ValueKey(_sectionKeys[7] ?? 0),
+        initialAction: _sectionTabs[7] ?? 0,
+      ),
     },
     {
       'index': 8,
       'icon': Icons.manage_accounts,
       'label': _t('用户管理', 'User Management'),
-      'page': const UserManagementPage(),
+      'page': UserManagementPage(
+        key: ValueKey(_sectionKeys[8] ?? 0),
+        initialAction: _sectionTabs[8] ?? 0,
+      ),
     },
     {
       'index': 9,
       'icon': Icons.storefront,
       'label': _t('商城与采购订单', 'Mall & Orders'),
-      'page': MallPage(key: ValueKey(_mallTab), initialTab: _mallTab),
+      'page': MallPage(
+        key: ValueKey(_sectionTabs[9] ?? 0),
+        initialTab: _sectionTabs[9] ?? 0,
+      ),
     },
   ];
+
+  List<String> _sectionLabels(int index) => switch (index) {
+    0 => [
+      _t('原材料', 'Raw Materials'),
+      _t('供应商', 'Suppliers'),
+      _t('单位', 'Units'),
+      _t('区域', 'Regions'),
+      _t('门店', 'Stores'),
+      _t('厨具', 'Kitchen Tools'),
+      _t('工艺', 'Processes'),
+      _t('工具', 'Tools'),
+      _t('提醒', 'Reminders'),
+      _t('原材料分类', 'Material Categories'),
+      _t('存放位置', 'Storage Locations'),
+    ],
+    1 => [_t('菜单分类', 'Menu Categories'), _t('菜单列表', 'Menus')],
+    2 => [_t('原材料列表', 'Material List'), _t('打印一览', 'Print Overview')],
+    3 => [
+      _t('半成品列表', 'Semi Products'),
+      _t('新增半成品', 'Add Semi Product'),
+      _t('分类管理', 'Categories'),
+    ],
+    4 => [
+      _t('检查记录', 'Check History'),
+      _t('添加检查数据', 'Add Check'),
+      _t('生成网页检查单', 'Print Checklist'),
+    ],
+    5 => [
+      _t('财务记录', 'Finance Records'),
+      _t('添加财务记录', 'Add Record'),
+      _t('导出财务记录', 'Export Records'),
+    ],
+    6 => [_t('点货记录', 'Stock Order History'), _t('新建点货', 'New Stock Order')],
+    7 => [_t('任务列表', 'Task List'), _t('添加任务', 'Add Task')],
+    8 => [_t('用户列表', 'Users'), _t('新增用户', 'Add User')],
+    9 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
+    _ => const [],
+  };
 
   void _logout() {
     SessionService().clear();
@@ -168,14 +240,21 @@ class _AdminPageState extends State<AdminPage> {
                     itemCount: menuItems.length,
                     itemBuilder: (context, index) {
                       final item = menuItems[index];
-                      if (item['index'] == 9) {
-                        return MallNavigation(
+                      final section = item['index'] as int;
+                      final labels = _sectionLabels(section);
+                      if (labels.isNotEmpty) {
+                        return SectionNavigation(
+                          title: item['label'] as String,
+                          icon: item['icon'] as IconData,
+                          labels: labels,
                           collapsed: _isSidebarCollapsed,
-                          selected: _selectedIndex == 9,
-                          tab: _mallTab,
+                          selected: _selectedIndex == section,
+                          tab: _sectionTabs[section] ?? 0,
                           onSelected: (tab) => setState(() {
-                            _selectedIndex = 9;
-                            _mallTab = tab;
+                            _selectedIndex = section;
+                            _sectionTabs[section] = tab;
+                            _sectionKeys[section] =
+                                (_sectionKeys[section] ?? 0) + 1;
                           }),
                         );
                       }

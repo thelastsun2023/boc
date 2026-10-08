@@ -3,7 +3,9 @@ import 'package:flutter/material.dart';
 import '../services/system_service.dart';
 
 class UserManagementPage extends StatefulWidget {
-  const UserManagementPage({super.key});
+  const UserManagementPage({super.key, this.initialAction = 0});
+
+  final int initialAction;
 
   @override
   State<UserManagementPage> createState() => _UserManagementPageState();
@@ -26,10 +28,19 @@ class _UserManagementPageState extends State<UserManagementPage> {
     return '$nameCN / $nameEN';
   }
 
+  Future<void> _openInitialAction() async {
+    await _loadData();
+    if (!mounted || _error != null || widget.initialAction == 0) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (widget.initialAction == 1) _showUserDialog();
+    });
+  }
+
   @override
   void initState() {
     super.initState();
-    _loadData();
+    _openInitialAction();
   }
 
   Future<void> _loadData() async {

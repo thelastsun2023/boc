@@ -1,4 +1,4 @@
-import '../widgets/mall_navigation.dart';
+import '../widgets/section_navigation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
@@ -16,7 +16,8 @@ class HomePage extends StatefulWidget {
 
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
-  int _mallTab = 0;
+  final _sectionTabs = <int, int>{};
+  final _sectionKeys = <int, int>{};
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
@@ -26,22 +27,38 @@ class _HomePageState extends State<HomePage> {
       'index': 0,
       'icon': Icons.shopping_cart_checkout,
       'label': _t('点货', 'Stock Order'),
-      'page': const StockOrderPage(),
+      'page': StockOrderPage(
+        key: ValueKey(_sectionKeys[0] ?? 0),
+        initialAction: _sectionTabs[0] ?? 0,
+      ),
     },
     {
       'index': 1,
       'icon': Icons.task_alt,
       'label': _t('待办事项', 'Todo'),
-      'page': const TodoPage(),
+      'page': TodoPage(
+        key: ValueKey(_sectionKeys[1] ?? 0),
+        initialAction: _sectionTabs[1] ?? 0,
+      ),
     },
     if (SessionService().canAccessMall)
       {
         'index': 2,
         'icon': Icons.storefront,
         'label': _t('商城与采购', 'Mall & Procurement'),
-        'page': MallPage(key: ValueKey(_mallTab), initialTab: _mallTab),
+        'page': MallPage(
+          key: ValueKey(_sectionTabs[2] ?? 0),
+          initialTab: _sectionTabs[2] ?? 0,
+        ),
       },
   ];
+
+  List<String> _sectionLabels(int index) => switch (index) {
+    0 => [_t('点货记录', 'Stock Order History'), _t('新建点货', 'New Stock Order')],
+    1 => [_t('任务列表', 'Task List'), _t('添加任务', 'Add Task')],
+    2 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
+    _ => const [],
+  };
 
   void _logout() {
     SessionService().clear();
@@ -119,14 +136,21 @@ class _HomePageState extends State<HomePage> {
                     itemCount: menuItems.length,
                     itemBuilder: (context, index) {
                       final item = menuItems[index];
-                      if (item['index'] == 2) {
-                        return MallNavigation(
+                      final section = item['index'] as int;
+                      final labels = _sectionLabels(section);
+                      if (labels.isNotEmpty) {
+                        return SectionNavigation(
+                          title: item['label'] as String,
+                          icon: item['icon'] as IconData,
+                          labels: labels,
                           collapsed: _isSidebarCollapsed,
-                          selected: _selectedIndex == 2,
-                          tab: _mallTab,
+                          selected: _selectedIndex == section,
+                          tab: _sectionTabs[section] ?? 0,
                           onSelected: (tab) => setState(() {
-                            _selectedIndex = 2;
-                            _mallTab = tab;
+                            _selectedIndex = section;
+                            _sectionTabs[section] = tab;
+                            _sectionKeys[section] =
+                                (_sectionKeys[section] ?? 0) + 1;
                           }),
                         );
                       }
