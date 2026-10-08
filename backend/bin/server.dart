@@ -1741,7 +1741,7 @@ Future<Response> _getRawMaterials(Request request) async {
         ss.name,
         rc.name,
         rc.name_en,
-        rl.name,
+        COALESCE(reg.name_cn, rl.name),
         rm.notes_rich,
         ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code)
       FROM raw_materials rm
@@ -1749,6 +1749,7 @@ Future<Response> _getRawMaterials(Request request) async {
       LEFT JOIN suppliers ss ON ss.code = rm.secondary_supplier_code
       LEFT JOIN raw_material_categories rc ON rc.code = rm.category_code
       LEFT JOIN raw_material_locations rl ON rl.code = rm.location_code
+      LEFT JOIN regions reg ON reg.code = rm.location_code
       ${scope.isAdmin ? '' : 'WHERE NOT EXISTS(SELECT 1 FROM raw_material_hidden_stores h WHERE h.material_code=rm.code AND h.store_code=\$1)'}
       ORDER BY rm.created_at DESC
       ''',

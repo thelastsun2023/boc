@@ -741,9 +741,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   Future<void> _showRawMaterialDialog({Map<String, dynamic>? item}) async {
     final isEdit = item != null;
     try {
-      final locations = await _systemService.getRawMaterialLocations();
+      final locations = await _systemService.getRegions();
       if (!mounted) return;
-      _rawMaterialLocations
+      _regions
         ..clear()
         ..addAll(locations);
     } catch (e) {
@@ -764,6 +764,19 @@ class _SystemManagementPageState extends State<SystemManagementPage>
     );
     String? categoryCode = item?['categoryCode'] as String?;
     String? locationCode = item?['locationCode'] as String?;
+    if (locationCode != null &&
+        !_regions.any((r) => r['code'] == locationCode)) {
+      final legacy = _rawMaterialLocations.where(
+        (r) => r['code'] == locationCode,
+      );
+      _regions.add({
+        'code': locationCode,
+        'nameCN': legacy.isNotEmpty
+            ? legacy.first['name']
+            : (item?['locationName'] ?? locationCode),
+        'nameEN': '',
+      });
+    }
     String? primarySupplierCode = item?['primarySupplierCode'] as String?;
     String? secondarySupplierCode = item?['secondarySupplierCode'] as String?;
     Uint8List? imageBytes = item?['imageBytes'] as Uint8List?;
@@ -841,21 +854,24 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
-                    key: ValueKey(
-                      'location-$locationCode-${_rawMaterialLocations.length}',
-                    ),
+                    key: ValueKey('location-$locationCode-${_regions.length}'),
                     initialValue: locationCode,
                     isExpanded: true,
-                    decoration: const InputDecoration(labelText: '位置'),
+                    decoration: const InputDecoration(labelText: '位置 / 区域'),
                     items: [
                       const DropdownMenuItem<String>(
                         value: null,
                         child: Text('未设置位置'),
                       ),
-                      ..._rawMaterialLocations.map(
+                      ..._regions.map(
                         (location) => DropdownMenuItem<String>(
                           value: location['code'] as String,
-                          child: Text(location['name'] as String? ?? '-'),
+                          child: Text(
+                            _orderedName(
+                              location['nameCN'] as String?,
+                              location['nameEN'] as String?,
+                            ),
+                          ),
                         ),
                       ),
                     ],
@@ -866,32 +882,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     },
                   ),
                   const SizedBox(height: 12),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton.icon(
-                      icon: const Icon(Icons.add_location_alt_outlined),
-                      label: const Text('新增位置'),
-                      onPressed: isSubmitting
-                          ? null
-                          : () async {
-                              final existing = _rawMaterialLocations
-                                  .map((e) => e['code'])
-                                  .toSet();
-                              await _showRawMaterialLocationDialog();
-                              if (!context.mounted) return;
-                              setDialogState(() {
-                                final added = _rawMaterialLocations.where(
-                                  (e) => !existing.contains(e['code']),
-                                );
-                                if (added.isNotEmpty) {
-                                  locationCode = added.first['code'] as String;
-                                }
-                              });
-                            },
-                    ),
-                  ),
-                  if (_rawMaterialLocations.isEmpty)
-                    const Text('尚未设置位置，请先新增位置。'),
+                  if (_regions.isEmpty) const Text('请先在系统管理的区域中添加位置。'),
                   DropdownButtonFormField<String>(
                     initialValue: primarySupplierCode,
                     decoration: const InputDecoration(labelText: '主要供应商'),

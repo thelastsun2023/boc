@@ -81,7 +81,7 @@ try:
     api('/api/todo-tasks/'+task,{'actorUsername':'admin'},method='PUT',expect=409)
     api('/api/todo-tasks/'+task+'?username=admin',method='DELETE',expect=409)
     # Persist rich notes, location links and store visibility through real APIs.
-    api('/api/raw-material-locations',{'code':'LOC_TEST','name':'Cold storage','note':''},token=admin)
+    api('/api/regions',{'code':'LOC_TEST','nameCN':'Cold storage','nameEN':'Cooler','note':''},token=admin)
     rich=json.dumps([{'insert':'Keep refrigerated','attributes':{'bold':True}},{'insert':'\n'}])
     update={'nameCN':'Renamed','nameEN':'Changed English','locationCode':'LOC_TEST','notesRich':rich,'visibleStoreCodes':['S001']}
     api('/api/raw-materials/TEST_A',update,token=admin,method='PUT')
