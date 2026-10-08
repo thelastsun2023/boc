@@ -1,3 +1,4 @@
+import '../widgets/material_notes.dart';
 import '../widgets/product_image.dart';
 import 'dart:typed_data';
 
@@ -739,6 +740,16 @@ class _SystemManagementPageState extends State<SystemManagementPage>
 
   Future<void> _showRawMaterialDialog({Map<String, dynamic>? item}) async {
     final isEdit = item != null;
+    try {
+      final locations = await _systemService.getRawMaterialLocations();
+      if (!mounted) return;
+      _rawMaterialLocations
+        ..clear()
+        ..addAll(locations);
+    } catch (e) {
+      if (mounted) _showMessage('读取位置失败：$e');
+      return;
+    }
     final nameCNController = TextEditingController(
       text: item?['nameCN'] as String? ?? '',
     );
@@ -758,6 +769,12 @@ class _SystemManagementPageState extends State<SystemManagementPage>
     Uint8List? imageBytes = item?['imageBytes'] as Uint8List?;
     String? imageUrl = item?['imageUrl'] as String?;
     String? imageFileName = item?['imagePath'] as String?;
+    String notesRich = item?['notesRich'] as String? ?? '[{"insert":"\\n"}]';
+    final hidden = List<String>.from(item?['hiddenStoreCodes'] ?? []);
+    final visibleStoreCodes = _stores
+        .map((store) => store['code'] as String)
+        .where((code) => !hidden.contains(code))
+        .toSet();
     bool isSubmitting = false;
 
     await showDialog<void>(
@@ -824,7 +841,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   ),
                   const SizedBox(height: 12),
                   DropdownButtonFormField<String>(
+                    key: ValueKey(
+                      'location-$locationCode-${_rawMaterialLocations.length}',
+                    ),
                     initialValue: locationCode,
+                    isExpanded: true,
                     decoration: const InputDecoration(labelText: '位置'),
                     items: [
                       const DropdownMenuItem<String>(
@@ -845,6 +866,32 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     },
                   ),
                   const SizedBox(height: 12),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: TextButton.icon(
+                      icon: const Icon(Icons.add_location_alt_outlined),
+                      label: const Text('新增位置'),
+                      onPressed: isSubmitting
+                          ? null
+                          : () async {
+                              final existing = _rawMaterialLocations
+                                  .map((e) => e['code'])
+                                  .toSet();
+                              await _showRawMaterialLocationDialog();
+                              if (!context.mounted) return;
+                              setDialogState(() {
+                                final added = _rawMaterialLocations.where(
+                                  (e) => !existing.contains(e['code']),
+                                );
+                                if (added.isNotEmpty) {
+                                  locationCode = added.first['code'] as String;
+                                }
+                              });
+                            },
+                    ),
+                  ),
+                  if (_rawMaterialLocations.isEmpty)
+                    const Text('尚未设置位置，请先新增位置。'),
                   DropdownButtonFormField<String>(
                     initialValue: primarySupplierCode,
                     decoration: const InputDecoration(labelText: '主要供应商'),
@@ -967,6 +1014,52 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         ),
                       ),
                     ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '备注 / Notes',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  MaterialNotes(
+                    value: notesRich,
+                    onChanged: (value) => notesRich = value,
+                  ),
+                  const SizedBox(height: 16),
+                  const Text(
+                    '显示门店 / Visible Stores',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                  const Text('勾选后此门店的商城和点货显示该原材料；新门店默认显示。'),
+                  Wrap(
+                    spacing: 8,
+                    children: [
+                      TextButton(
+                        onPressed: () => setDialogState(
+                          () => visibleStoreCodes.addAll(
+                            _stores.map((x) => x['code'] as String),
+                          ),
+                        ),
+                        child: const Text('全部勾选'),
+                      ),
+                      TextButton(
+                        onPressed: () =>
+                            setDialogState(() => visibleStoreCodes.clear()),
+                        child: const Text('全部取消'),
+                      ),
+                    ],
+                  ),
+                  for (final store in _stores)
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text('${store['name']} (${store['code']})'),
+                      value: visibleStoreCodes.contains(store['code']),
+                      onChanged: (value) => setDialogState(() {
+                        if (value == true) {
+                          visibleStoreCodes.add(store['code'] as String);
+                        } else {
+                          visibleStoreCodes.remove(store['code']);
+                        }
+                      }),
+                    ),
                 ],
               ),
             ),
@@ -1004,6 +1097,8 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 minQuantity,
                                 imageBytes,
                                 imageFileName,
+                                notesRich: notesRich,
+                                visibleStoreCodes: visibleStoreCodes.toList(),
                               )
                             : await _systemService.addRawMaterial(
                                 nameCN,
@@ -1016,6 +1111,8 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 minQuantity,
                                 imageBytes,
                                 imageFileName,
+                                notesRich: notesRich,
+                                visibleStoreCodes: visibleStoreCodes.toList(),
                               );
                         if (success) {
                           await _loadAllData();

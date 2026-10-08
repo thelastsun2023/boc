@@ -1,3 +1,4 @@
+import '../widgets/material_notes.dart';
 import '../widgets/product_image.dart';
 import 'dart:convert';
 import 'dart:math';
@@ -355,6 +356,16 @@ class _MallPageState extends State<MallPage> {
           maxLines: 1,
           overflow: TextOverflow.ellipsis,
         ),
+        if (hasMaterialNotes(p['notesRich'] as String?))
+          TextButton.icon(
+            onPressed: () => showMaterialNotes(
+              context,
+              _productName(p),
+              p['notesRich'] as String,
+            ),
+            icon: const Icon(Icons.notes, size: 16),
+            label: const Text('备注 / Notes'),
+          ),
       ],
     );
     final controls = Row(
@@ -552,7 +563,7 @@ class _MallPageState extends State<MallPage> {
                       padding: const EdgeInsets.all(12),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
-                        mainAxisExtent: 410,
+                        mainAxisExtent: 450,
                         crossAxisSpacing: 12,
                         mainAxisSpacing: 12,
                       ),

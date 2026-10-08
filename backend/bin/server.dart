@@ -9,6 +9,7 @@ import 'package:shelf_static/shelf_static.dart';
 import 'package:postgres/postgres.dart';
 import 'package:crypto/crypto.dart';
 part 'mall.dart';
+part 'material_settings.dart';
 
 const Set<String> _financePaymentMethods = {
   '店里卡',
@@ -692,6 +693,7 @@ Future<void> initDb() async {
   await _advanceSerialIdSequences();
 
   // Seed or synchronize admin user to lowercase credentials
+  await _initMaterialSettings();
   await _initMall();
   final hashedPw = sha256.convert(utf8.encode('admin')).toString();
   final res = await _conn.execute(
@@ -1630,10 +1632,13 @@ double _normalizedMinQuantity(dynamic value) {
 
 // Raw Materials APIs
 Future<Response> _addRawMaterial(Request request) async {
+  final denied = await _requireUserAdmin(request);
+  if (denied != null) return denied;
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
     final code = _normalizedOptionalString(json['code']);
+    final settings = await _materialSettings(json);
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
@@ -1690,6 +1695,7 @@ Future<Response> _addRawMaterial(Request request) async {
       ],
     );
 
+    await _saveMaterialSettings(finalCode, settings);
     return Response.ok(
       jsonEncode({
         'success': true,
@@ -1701,6 +1707,8 @@ Future<Response> _addRawMaterial(Request request) async {
         'Access-Control-Allow-Origin': '*',
       },
     );
+  } on FormatException catch (e) {
+    return _mallJson({'error': e.message}, 400);
   } catch (e) {
     return Response.internalServerError(
       body: jsonEncode({'error': e.toString()}),
@@ -1714,6 +1722,8 @@ Future<Response> _addRawMaterial(Request request) async {
 
 Future<Response> _getRawMaterials(Request request) async {
   try {
+    final scope = await _authenticatedScope(request);
+    if (scope == null) return _mallJson({'error': '请重新登录'}, 401);
     final result = await _conn.execute(
       '''
       SELECT
@@ -1731,14 +1741,18 @@ Future<Response> _getRawMaterials(Request request) async {
         ss.name,
         rc.name,
         rc.name_en,
-        rl.name
+        rl.name,
+        rm.notes_rich,
+        ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code)
       FROM raw_materials rm
       LEFT JOIN suppliers ps ON ps.code = rm.primary_supplier_code
       LEFT JOIN suppliers ss ON ss.code = rm.secondary_supplier_code
       LEFT JOIN raw_material_categories rc ON rc.code = rm.category_code
       LEFT JOIN raw_material_locations rl ON rl.code = rm.location_code
+      ${scope.isAdmin ? '' : 'WHERE NOT EXISTS(SELECT 1 FROM raw_material_hidden_stores h WHERE h.material_code=rm.code AND h.store_code=\$1)'}
       ORDER BY rm.created_at DESC
       ''',
+      parameters: scope.isAdmin ? [] : [scope.storeCode],
     );
     final materials = result
         .map((row) => {
@@ -1759,6 +1773,8 @@ Future<Response> _getRawMaterials(Request request) async {
               'categoryNameCN': row[12],
               'categoryNameEN': row[13],
               'locationName': row[14],
+              'notesRich': row[15],
+              'hiddenStoreCodes': row[16],
             })
         .toList();
 
@@ -1929,9 +1945,12 @@ Future<Response> _serveUploadedImage(Request request, String fileName) async {
 }
 
 Future<Response> _updateRawMaterial(Request request, String code) async {
+  final denied = await _requireUserAdmin(request);
+  if (denied != null) return denied;
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
+    final settings = await _materialSettings(json);
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
@@ -2045,6 +2064,7 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
       );
     }
 
+    await _saveMaterialSettings(code, settings);
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Raw material updated'}),
       headers: {
@@ -2052,6 +2072,8 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
         'Access-Control-Allow-Origin': '*'
       },
     );
+  } on FormatException catch (e) {
+    return _mallJson({'error': e.message}, 400);
   } catch (e) {
     return Response.internalServerError(
       body: jsonEncode({'error': e.toString()}),
@@ -4562,8 +4584,7 @@ Future<Response> _addStockOrder(Request request) async {
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
-    final scope =
-        await _getUserScopeByUsername(json['actorUsername'] as String?);
+    final scope = await _authenticatedScope(request);
     if (scope == null) {
       return Response.badRequest(
         body: jsonEncode({'error': 'Missing or invalid actorUsername'}),
@@ -4614,6 +4635,7 @@ Future<Response> _addStockOrder(Request request) async {
       }
     }
 
+    if (!await _stockMaterialsAllowed(details, storeCode)) return _mallJson({'error':'购物车中有此门店不可见的原材料，请重新选择'},403);
     final result = await _conn.execute(
       'INSERT INTO stock_orders (order_date, details, is_confirmed, owner_username, store_code) VALUES (\$1, \$2, \$3, \$4, \$5) RETURNING id',
       parameters: [

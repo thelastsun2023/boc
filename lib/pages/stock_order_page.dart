@@ -280,6 +280,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
         items.add({
           'code': raw['code'] ?? '',
           'nameCN': raw['nameCN'] ?? '',
+          'notesRich': raw['notesRich'],
           'nameEN': raw['nameEN'] ?? '',
           'description': raw['description'] ?? '',
           'currentStock': _toInt(raw['currentStock']),
@@ -306,6 +307,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
         items.add({
           'code': raw['code'] ?? '',
           'nameCN': raw['nameCN'] ?? '',
+          'notesRich': raw['notesRich'],
           'nameEN': raw['nameEN'] ?? '',
           'description': raw['specification'] ?? '',
           'currentStock': 0,
@@ -323,6 +325,15 @@ class _StockOrderPageState extends State<StockOrderPage> {
       }
     }
 
+    bool availableForStore(Map<String, dynamic> item) {
+      if (isEdit || selectedStoreCode == null) return true;
+      final raw = _rawMaterials.where((r) => r['code'] == item['code']);
+      return raw.isEmpty ||
+          !(raw.first['hiddenStoreCodes'] as List? ?? []).contains(
+            selectedStoreCode,
+          );
+    }
+
     final categorySelections = <String, bool>{};
 
     await showDialog<void>(
@@ -332,6 +343,17 @@ class _StockOrderPageState extends State<StockOrderPage> {
           builder: (context, setDialogState) {
             final categoryGroups = <String, List<Map<String, dynamic>>>{};
             for (final item in items) {
+              final raw = _rawMaterials.where((r) => r['code'] == item['code']);
+              if (!isEdit &&
+                  selectedStoreCode != null &&
+                  raw.isNotEmpty &&
+                  (raw.first['hiddenStoreCodes'] as List? ?? []).contains(
+                    selectedStoreCode,
+                  )) {
+                item['categorySelected'] = false;
+                item['orderQuantity'] = 0;
+                continue;
+              }
               final category = _categoryDisplayName(item);
               categoryGroups.putIfAbsent(category, () => []).add(item);
             }
@@ -660,7 +682,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
                           }
 
                           try {
-                            final details = items.map((item) {
+                            final details = items.where(availableForStore).map((
+                              item,
+                            ) {
                               return {
                                 'code': item['code'],
                                 'nameCN': item['nameCN'],
@@ -785,7 +809,9 @@ class _StockOrderPageState extends State<StockOrderPage> {
 
                           try {
                             int orderId;
-                            final details = items.map((item) {
+                            final details = items.where(availableForStore).map((
+                              item,
+                            ) {
                               return {
                                 'code': item['code'],
                                 'nameCN': item['nameCN'],

@@ -95,9 +95,11 @@ Future<Response> _mallProducts(Request request) =>
     _mallCall(request, (scope, data) async {
       final rows = await _conn.execute(
           '''SELECT r.code,r.name_cn,r.name_en,COALESCE(r.specification,''),r.category_code,
-    COALESCE(c.name,'未分类'),r.image_path,r.mall_out_of_stock
+    COALESCE(c.name,'未分类'),r.image_path,r.mall_out_of_stock,r.notes_rich
     FROM raw_materials r LEFT JOIN raw_material_categories c ON c.code=r.category_code
-    ORDER BY c.name,r.name_cn''');
+    ${scope.isAdmin ? '' : 'WHERE NOT EXISTS(SELECT 1 FROM raw_material_hidden_stores h WHERE h.material_code=r.code AND h.store_code=\$1)'}
+    ORDER BY c.name,r.name_cn''',
+          parameters: scope.isAdmin ? [] : [scope.storeCode]);
       final products = rows
           .map((r) => {
                 'code': r[0],
@@ -107,7 +109,8 @@ Future<Response> _mallProducts(Request request) =>
                 'categoryCode': r[4],
                 'categoryName': r[5],
                 'imagePath': _imageUrlFromPath(r[6] as String?),
-                'outOfStock': false
+                'outOfStock': false,
+                'notesRich': r[8]
               })
           .toList();
       return _mallJson({'products': products});
@@ -159,6 +162,10 @@ Future<Response> _mallCreateOrder(Request request) =>
         final orderId = inserted.first[0] as int;
         final lines = <String>[];
         for (final item in items) {
+          final hidden = await tx.execute(
+              'SELECT 1 FROM raw_material_hidden_stores WHERE material_code=\$1 AND store_code=\$2',
+              parameters: [item['code'], store]);
+          if (hidden.isNotEmpty) throw _MallError(403, '该商品不在此门店的商城中显示，请刷新');
           final rows = await tx.execute(
               'SELECT name_cn,COALESCE(specification,\'\'),COALESCE(name_en,\'\') FROM raw_materials WHERE code=\$1 FOR SHARE',
               parameters: [item['code']]);

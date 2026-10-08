@@ -80,6 +80,26 @@ try:
     task=sql('SELECT id FROM todo_tasks WHERE mall_order_id='+str(order))
     api('/api/todo-tasks/'+task,{'actorUsername':'admin'},method='PUT',expect=409)
     api('/api/todo-tasks/'+task+'?username=admin',method='DELETE',expect=409)
+    # Persist rich notes, location links and store visibility through real APIs.
+    api('/api/raw-material-locations',{'code':'LOC_TEST','name':'Cold storage','note':''},token=admin)
+    rich=json.dumps([{'insert':'Keep refrigerated','attributes':{'bold':True}},{'insert':'\n'}])
+    update={'nameCN':'Renamed','nameEN':'Changed English','locationCode':'LOC_TEST','notesRich':rich,'visibleStoreCodes':['S001']}
+    api('/api/raw-materials/TEST_A',update,token=admin,method='PUT')
+    raw=next(x for x in api('/api/raw-materials',token=admin)['materials'] if x['code']=='TEST_A')
+    assert raw['locationCode']=='LOC_TEST' and raw['locationName']=='Cold storage'
+    assert json.loads(raw['notesRich'])==json.loads(rich) and raw['hiddenStoreCodes']==['S002']
+    assert 'TEST_A' not in [x['code'] for x in api('/api/raw-materials',token=b)['materials']]
+    assert 'TEST_A' not in [x['code'] for x in api('/api/mall/products',token=b)['products']]
+    api('/api/mall/orders',{'submissionKey':'hidden','items':[{'code':'TEST_A','quantity':1}]},token=b,expect=403)
+    api('/api/stock-orders',{'orderDate':'2026-10-07','storeCode':'S002','details':[{'code':'TEST_A','orderQuantity':1}]},token=b,expect=403)
+    api('/api/raw-materials/TEST_A',{**update,'visibleStoreCodes':['MISSING']},token=admin,method='PUT',expect=400)
+    sql("INSERT INTO stores(code,name) VALUES('S003','New store')")
+    api('/api/users/mall_b',{**permission,'storeCode':'S003'},token=admin,method='PUT')
+    assert 'TEST_A' in [x['code'] for x in api('/api/mall/products',token=b)['products']]
+    api('/api/raw-materials',{'code':'TEST_NEW','nameCN':'New','locationCode':'LOC_TEST'},token=admin)
+    raw=next(x for x in api('/api/raw-materials',token=admin)['materials'] if x['code']=='TEST_NEW')
+    assert raw['locationName']=='Cold storage' and raw['hiddenStoreCodes']==[]
+    print('PASS: notes/location database persistence, store filtering, stale submission rejection, new-store defaults')
     print('PASS: authentication, store binding, owner isolation, admin permissions, quantities, atomic rollback, idempotency, historical snapshots, procurement/out-of-stock/task transitions, task protection')
 finally:
     if server:

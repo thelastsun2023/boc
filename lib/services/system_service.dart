@@ -23,8 +23,10 @@ class SystemService {
     String? secondarySupplierCode,
     double minQuantity,
     Uint8List? imageBytes,
-    String? imageFileName,
-  ) async {
+    String? imageFileName, {
+    String? notesRich,
+    List<String>? visibleStoreCodes,
+  }) async {
     final imagePath = await _uploadImage(imageBytes, imageFileName);
     return _post('/api/raw-materials', {
       'nameCN': nameCN,
@@ -35,6 +37,8 @@ class SystemService {
       'primarySupplierCode': primarySupplierCode,
       'secondarySupplierCode': secondarySupplierCode,
       'minQuantity': minQuantity,
+      if (notesRich != null) 'notesRich': notesRich,
+      if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
       'imagePath': imagePath,
     }, 'Failed to add raw material');
   }
@@ -58,8 +62,10 @@ class SystemService {
     String? secondarySupplierCode,
     double minQuantity,
     Uint8List? imageBytes,
-    String? imageFileName,
-  ) async {
+    String? imageFileName, {
+    String? notesRich,
+    List<String>? visibleStoreCodes,
+  }) async {
     final encodedCode = Uri.encodeComponent(code);
     final imagePath = await _uploadImage(imageBytes, imageFileName);
     final payload = <String, dynamic>{
@@ -71,6 +77,8 @@ class SystemService {
       'primarySupplierCode': primarySupplierCode,
       'secondarySupplierCode': secondarySupplierCode,
       'minQuantity': minQuantity,
+      if (notesRich != null) 'notesRich': notesRich,
+      if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
     };
     if (imagePath != null) {
       payload['imagePath'] = imagePath;
@@ -575,7 +583,10 @@ class SystemService {
       final uri = Uri.parse('$baseUrl/api/stock-orders');
       final response = await http.post(
         uri,
-        headers: {'Content-Type': 'application/json'},
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ${session.token ?? ''}',
+        },
         body: jsonEncode({
           'orderDate': orderDate,
           'details': details,
@@ -957,7 +968,10 @@ class SystemService {
 
   Future<Map<String, dynamic>> _get(String path, String message) async {
     try {
-      final response = await http.get(Uri.parse('$baseUrl$path'));
+      final response = await http.get(
+        Uri.parse('$baseUrl$path'),
+        headers: {'Authorization': 'Bearer ${SessionService().token ?? ''}'},
+      );
       if (response.statusCode == 200) {
         return jsonDecode(response.body) as Map<String, dynamic>;
       }
