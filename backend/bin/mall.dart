@@ -106,7 +106,7 @@ Future<Response> _mallProducts(Request request) =>
                 'specification': r[3],
                 'categoryCode': r[4],
                 'categoryName': r[5],
-                'imagePath': r[6],
+                'imagePath': _imageUrlFromPath(r[6] as String?),
                 'outOfStock': false
               })
           .toList();
