@@ -32,7 +32,7 @@ class SectionNavigation extends StatelessWidget {
       );
     }
     return ExpansionTile(
-      initiallyExpanded: selected,
+      initiallyExpanded: false,
       collapsedIconColor: Colors.grey,
       iconColor: Colors.blue,
       leading: Icon(icon, color: selected ? Colors.blue : Colors.grey),
