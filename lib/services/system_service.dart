@@ -116,10 +116,11 @@ class SystemService {
     String nameEN,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put('/api/raw-material-categories/$encodedCode', {
-      'nameCN': nameCN,
-      'nameEN': nameEN,
-    }, 'Failed to update raw material category');
+    return _put(
+      '/api/raw-material-categories/$encodedCode',
+      {'nameCN': nameCN, 'nameEN': nameEN},
+      'Failed to update raw material category',
+    );
   }
 
   Future<bool> deleteRawMaterialCategory(String code) async {
@@ -156,10 +157,11 @@ class SystemService {
     String note,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put('/api/raw-material-locations/$encodedCode', {
-      'name': name,
-      'note': note,
-    }, 'Failed to update raw material location');
+    return _put(
+      '/api/raw-material-locations/$encodedCode',
+      {'name': name, 'note': note},
+      'Failed to update raw material location',
+    );
   }
 
   Future<bool> deleteRawMaterialLocation(String code) async {
@@ -392,10 +394,11 @@ class SystemService {
     String nameEN,
   ) async {
     final encodedCode = Uri.encodeComponent(code);
-    return _put('/api/semi-product-categories/$encodedCode', {
-      'nameCN': nameCN,
-      'nameEN': nameEN,
-    }, 'Failed to update semi product category');
+    return _put(
+      '/api/semi-product-categories/$encodedCode',
+      {'nameCN': nameCN, 'nameEN': nameEN},
+      'Failed to update semi product category',
+    );
   }
 
   Future<bool> deleteSemiProductCategory(String code) async {
@@ -456,15 +459,19 @@ class SystemService {
   ) async {
     final encodedId = Uri.encodeComponent(id.toString());
     final session = SessionService();
-    return _put('/api/semi-product-stock-checks/$encodedId', {
-      'semiProductCode': semiProductCode,
-      'regionCode': regionCode,
-      'weekdayStock': weekdayStock,
-      'weekendStock': weekendStock,
-      'holidayStock': holidayStock,
-      'actorUsername': session.username,
-      'storeCode': session.storeCode,
-    }, 'Failed to update semi product stock check');
+    return _put(
+      '/api/semi-product-stock-checks/$encodedId',
+      {
+        'semiProductCode': semiProductCode,
+        'regionCode': regionCode,
+        'weekdayStock': weekdayStock,
+        'weekendStock': weekendStock,
+        'holidayStock': holidayStock,
+        'actorUsername': session.username,
+        'storeCode': session.storeCode,
+      },
+      'Failed to update semi product stock check',
+    );
   }
 
   Future<bool> deleteSemiProductStockCheck(int id) async {
@@ -909,6 +916,7 @@ class SystemService {
     required String role,
     String? storeCode,
     String uiLanguage = 'ZH',
+    bool mallEnabled = false,
     required List<String> allowedCategoryCodes,
   }) async {
     return _post('/api/register', {
@@ -917,6 +925,7 @@ class SystemService {
       'role': role,
       'storeCode': storeCode,
       'uiLanguage': uiLanguage,
+      'mallEnabled': mallEnabled,
       'allowedCategoryCodes': allowedCategoryCodes,
     }, 'Failed to add user');
   }
@@ -927,6 +936,7 @@ class SystemService {
     required String role,
     String? storeCode,
     String uiLanguage = 'ZH',
+    bool mallEnabled = false,
     required List<String> allowedCategoryCodes,
   }) async {
     final encodedUsername = Uri.encodeComponent(username);
@@ -935,6 +945,7 @@ class SystemService {
       'role': role,
       'storeCode': storeCode,
       'uiLanguage': uiLanguage,
+      'mallEnabled': mallEnabled,
       'allowedCategoryCodes': allowedCategoryCodes,
     }, 'Failed to update user');
   }
@@ -982,6 +993,7 @@ class SystemService {
       final uri = Uri.parse('$baseUrl$path');
       final request = http.Request(method, uri)
         ..headers['Content-Type'] = 'application/json'
+        ..headers['Authorization'] = 'Bearer ${SessionService().token ?? ''}'
         ..body = jsonEncode(payload);
       final streamed = await request.send();
       final response = await http.Response.fromStream(streamed);

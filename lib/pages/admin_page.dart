@@ -12,6 +12,7 @@ import 'stock_order_page.dart';
 import 'system_management_page.dart';
 import 'todo_page.dart';
 import 'user_management_page.dart';
+import 'mall_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -81,6 +82,7 @@ class _AdminPageState extends State<AdminPage> {
       'label': _t('用户管理', 'User Management'),
       'page': const UserManagementPage(),
     },
+    {'index': 9, 'icon': Icons.storefront, 'label': _t('商城与采购订单', 'Mall & Orders'), 'page': const MallPage()},
   ];
 
   void _logout() {

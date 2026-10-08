@@ -6,6 +6,9 @@ class SessionService {
   String? username;
   String? role;
   String? storeCode;
+  String? token;
+  bool mallEnabled = false;
+  bool get canAccessMall => isAdmin || mallEnabled;
   String uiLanguage = 'ZH';
   List<String> allowedCategoryCodes = const [];
 
@@ -17,11 +20,15 @@ class SessionService {
     required String username,
     required String role,
     String? storeCode,
+    String? token,
     String uiLanguage = 'ZH',
+    bool mallEnabled = false,
     required List<String> allowedCategoryCodes,
   }) {
     this.username = username;
     this.role = role;
+    this.token = token;
+    this.mallEnabled = mallEnabled;
     this.storeCode = storeCode?.trim().isEmpty == true
         ? null
         : storeCode?.trim();
@@ -44,6 +51,8 @@ class SessionService {
   void clear() {
     username = null;
     role = null;
+    token = null;
+    mallEnabled = false;
     storeCode = null;
     uiLanguage = 'ZH';
     allowedCategoryCodes = const [];

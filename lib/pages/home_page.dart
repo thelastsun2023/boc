@@ -4,6 +4,7 @@ import '../services/session_service.dart';
 import 'login_page.dart';
 import 'stock_order_page.dart';
 import 'todo_page.dart';
+import 'mall_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -31,6 +32,13 @@ class _HomePageState extends State<HomePage> {
       'label': _t('待办事项', 'Todo'),
       'page': const TodoPage(),
     },
+    if (SessionService().canAccessMall)
+      {
+        'index': 2,
+        'icon': Icons.storefront,
+        'label': _t('商城与采购', 'Mall & Procurement'),
+        'page': const MallPage(),
+      },
   ];
 
   void _logout() {

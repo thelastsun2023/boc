@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 import 'package:shelf_static/shelf_static.dart';
 import 'package:postgres/postgres.dart';
 import 'package:crypto/crypto.dart';
+part 'mall.dart';
 
 const Set<String> _financePaymentMethods = {
   '店里卡',
@@ -692,6 +694,7 @@ Future<void> initDb() async {
   await _advanceSerialIdSequences();
 
   // Seed or synchronize admin user to lowercase credentials
+  await _initMall();
   final hashedPw = sha256.convert(utf8.encode('admin')).toString();
   final res = await _conn.execute(
     'SELECT id, username FROM users WHERE LOWER(username) = LOWER(\$1)',
@@ -817,6 +820,10 @@ Middleware corsMiddleware() {
 
 // Routes
 final _router = Router()
+  ..get('/api/mall/products', _mallProducts)
+  ..post('/api/mall/orders', _mallCreateOrder)
+  ..get('/api/mall/orders', _mallOrders)
+  ..put('/api/mall/orders/<id>/items/<itemId>', _mallUpdateItem)
   ..post('/api/login', _login)
   ..post('/api/register', _register)
   ..get('/api/users', _getUsers)
@@ -981,7 +988,7 @@ Future<Response> _login(Request request) async {
     print('Login attempt: username=$username, hashedPw=$hashedPw');
 
     final result = await _conn.execute(
-      'SELECT id, username, role, store_code, ui_language FROM users WHERE LOWER(username) = LOWER(\$1) AND password = \$2',
+      'SELECT id, username, role, store_code, ui_language, mall_enabled FROM users WHERE LOWER(username) = LOWER(\$1) AND password = \$2',
       parameters: [username, hashedPw],
     );
     print('Query result: ${result.length} rows found');
@@ -1013,6 +1020,8 @@ Future<Response> _login(Request request) async {
         'storeCode': storeCode,
         'uiLanguage': uiLanguage,
         'allowedCategoryCodes': allowedCategoryCodes,
+        'token': await _issueMallToken(dbUsername),
+        'mallEnabled': role == 'ADMIN' || result.first[5] == true,
       }),
       headers: {
         'Content-Type': 'application/json',
@@ -1047,6 +1056,8 @@ Future<Response> _login(Request request) async {
 }
 
 Future<Response> _register(Request request) async {
+  final denied = await _requireUserAdmin(request);
+  if (denied != null) return denied;
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -1107,6 +1118,7 @@ Future<Response> _register(Request request) async {
         ],
       );
       final userId = result.first[0] as int;
+      await _conn.execute('UPDATE users SET mall_enabled=\$1 WHERE id=\$2', parameters: [json['mallEnabled'] == true, userId]);
       await _replaceUserCategoryPermissions(
         userId,
         role == 'ADMIN' ? const [] : allowedCategoryCodes,
@@ -1214,11 +1226,12 @@ Future<Response> _getUsers(Request request) async {
             END
           ) FILTER (WHERE c.name IS NOT NULL),
           ARRAY[]::VARCHAR[]
-        ) AS allowed_category_names
+        ) AS allowed_category_names,
+        u.mall_enabled
       FROM users u
       LEFT JOIN user_raw_material_category_permissions p ON p.user_id = u.id
       LEFT JOIN raw_material_categories c ON c.code = p.category_code
-      GROUP BY u.id, u.username, u.role, u.store_code, u.ui_language
+      GROUP BY u.id, u.username, u.role, u.store_code, u.ui_language, u.mall_enabled
       ORDER BY u.username ASC
     ''');
 
@@ -1231,6 +1244,7 @@ Future<Response> _getUsers(Request request) async {
         'uiLanguage': _normalizedUiLanguage(row[4]),
         'allowedCategoryCodes': List<String>.from(row[5] as List? ?? const []),
         'allowedCategoryNames': List<String>.from(row[6] as List? ?? const []),
+        'mallEnabled': row[2] == 'ADMIN' || row[7] == true,
       };
     }).toList();
 
@@ -1253,6 +1267,8 @@ Future<Response> _getUsers(Request request) async {
 }
 
 Future<Response> _updateUser(Request request, String username) async {
+  final denied = await _requireUserAdmin(request);
+  if (denied != null) return denied;
   try {
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
@@ -1323,6 +1339,9 @@ Future<Response> _updateUser(Request request, String username) async {
       );
     }
 
+    if (json.containsKey('mallEnabled')) {
+      await _conn.execute('UPDATE users SET mall_enabled=\$1 WHERE id=\$2', parameters: [json['mallEnabled'] == true, userId]);
+    }
     await _replaceUserCategoryPermissions(
       userId,
       role == 'ADMIN' ? const [] : allowedCategoryCodes,
@@ -4333,6 +4352,9 @@ Future<Response> _getTodoTasks(Request request) async {
 
 Future<Response> _updateTodoTask(Request request, String id) async {
   try {
+    if (await _isMallTask(int.parse(id))) {
+      return _mallJson({'error': '商城采购任务由订单逐项状态自动更新，请在商城订单中操作'}, 409);
+    }
     final body = await request.readAsString();
     final json = jsonDecode(body) as Map<String, dynamic>;
     final scope =
@@ -4467,6 +4489,9 @@ Future<Response> _updateTodoTask(Request request, String id) async {
 
 Future<Response> _deleteTodoTask(Request request, String id) async {
   try {
+    if (await _isMallTask(int.parse(id))) {
+      return _mallJson({'error': '商城采购任务关联订单，不能单独删除'}, 409);
+    }
     final scope = await _getUserScopeByUsername(
       request.requestedUri.queryParameters['username'],
     );
@@ -6025,7 +6050,8 @@ void main() async {
 
     // Read server port from config, default to 8081
     final port = int.tryParse(_getConfig('PORT') ?? '8081') ?? 8081;
-    final server = await shelf_io.serve(handler, InternetAddress.anyIPv4, port);
+    final host = _getConfig('HOST') ?? InternetAddress.anyIPv4.address;
+    final server = await shelf_io.serve(handler, host, port);
     print('Server listening on http://${server.address.host}:${server.port}');
   } catch (e, st) {
     stderr.writeln('Startup failed: $e');

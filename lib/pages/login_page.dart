@@ -64,6 +64,8 @@ class _LoginPageState extends State<LoginPage> {
         username: username,
         role: role,
         storeCode: storeCode,
+        token: loginResult['token'] as String?,
+        mallEnabled: loginResult['mallEnabled'] == true,
         uiLanguage: uiLanguage,
         allowedCategoryCodes: allowedCategoryCodes,
       );

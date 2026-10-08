@@ -98,6 +98,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
     final selectedCategoryCodes = <String>{
       ...List<String>.from(user?['allowedCategoryCodes'] ?? const []),
     };
+    bool mallEnabled = user?['mallEnabled'] == true;
     bool isSubmitting = false;
 
     await showDialog<void>(
@@ -187,6 +188,20 @@ class _UserManagementPageState extends State<UserManagementPage> {
                       },
                     ),
                   const SizedBox(height: 16),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('商城与采购 / Mall & Procurement'),
+                    subtitle: Text(
+                      selectedRole == 'ADMIN'
+                          ? '管理员默认可访问'
+                          : '勾选后显示入口并允许选购及查看自己的订单',
+                    ),
+                    value: selectedRole == 'ADMIN' || mallEnabled,
+                    onChanged: selectedRole == 'ADMIN'
+                        ? null
+                        : (value) =>
+                              setDialogState(() => mallEnabled = value == true),
+                  ),
                   const Text(
                     '可点货分类',
                     style: TextStyle(fontWeight: FontWeight.bold),
@@ -273,6 +288,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ? null
                                     : storeCode,
                                 uiLanguage: selectedUiLanguage,
+                                mallEnabled: mallEnabled,
                                 allowedCategoryCodes: selectedRole == 'ADMIN'
                                     ? const []
                                     : selectedCategoryCodes.toList(),
@@ -285,6 +301,7 @@ class _UserManagementPageState extends State<UserManagementPage> {
                                     ? null
                                     : storeCode,
                                 uiLanguage: selectedUiLanguage,
+                                mallEnabled: mallEnabled,
                                 allowedCategoryCodes: selectedRole == 'ADMIN'
                                     ? const []
                                     : selectedCategoryCodes.toList(),

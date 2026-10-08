@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../services/session_service.dart';
 import '../services/system_service.dart';
+import 'mall_page.dart';
 
 class TodoPage extends StatefulWidget {
   const TodoPage({super.key});
@@ -143,6 +144,11 @@ class _TodoPageState extends State<TodoPage> {
   }
 
   Future<void> _showTaskDialog({Map<String, dynamic>? task}) async {
+    if (task?['taskType'] == 'MALL_ORDER') {
+      await Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MallPage(initialTab: 1)));
+      await _loadTasks();
+      return;
+    }
     final isEdit = task != null;
     final titleController = TextEditingController(
       text: task?['title'] as String? ?? '',
@@ -330,6 +336,10 @@ class _TodoPageState extends State<TodoPage> {
   }
 
   Future<void> _markCompleted(Map<String, dynamic> task) async {
+    if (task['taskType'] == 'MALL_ORDER') {
+      await _showTaskDialog(task: task);
+      return;
+    }
     try {
       final id = task['id'] as int;
       await _service.updateTodoTask(

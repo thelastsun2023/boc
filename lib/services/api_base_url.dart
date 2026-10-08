@@ -6,6 +6,10 @@ const String _devBackendHost = 'localhost';
 const int _devBackendPort = 8081;
 
 String getBaseUrl() {
+  const configuredUrl = String.fromEnvironment('BOC_API_BASE_URL');
+  if (configuredUrl.isNotEmpty) {
+    return configuredUrl;
+  }
   if (kIsWeb) {
     // In production the Flutter web build is served by the same Dart backend,
     // so all API calls are same-origin — no host or port needed.
