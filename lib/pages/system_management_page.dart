@@ -2785,6 +2785,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     'raw-material-list-search-${_selectedRawMaterialListCode ?? 'all'}-${_rawMaterials.length}',
                   ),
                   initialSelection: _selectedRawMaterialListCode,
+                  menuHeight: 250,
+                  menuStyle: const MenuStyle(
+                    alignment: AlignmentDirectional.bottomStart,
+                  ),
+                  alignmentOffset: const Offset(0, 4),
                   enableFilter: true,
                   enableSearch: true,
                   requestFocusOnTap: true,
