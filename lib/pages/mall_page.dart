@@ -435,23 +435,39 @@ class _MallPageState extends State<MallPage> {
                   SizedBox(width: double.infinity, child: addToCart),
                 ],
               )
-            : Column(
-                children: [
-                  Row(
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  final information = Row(
                     children: [
                       picture,
                       const SizedBox(width: 12),
                       Expanded(child: details),
                     ],
-                  ),
-                  const SizedBox(height: 8),
-                  Wrap(
+                  );
+                  final actions = Wrap(
                     alignment: WrapAlignment.end,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     spacing: 12,
+                    runSpacing: 8,
                     children: [controls, addToCart],
-                  ),
-                ],
+                  );
+                  if (constraints.maxWidth >= 760) {
+                    return Row(
+                      children: [
+                        Expanded(child: information),
+                        const SizedBox(width: 16),
+                        actions,
+                      ],
+                    );
+                  }
+                  return Column(
+                    children: [
+                      information,
+                      const SizedBox(height: 8),
+                      Align(alignment: Alignment.centerRight, child: actions),
+                    ],
+                  );
+                },
               ),
       ),
     );
