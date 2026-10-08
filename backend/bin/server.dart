@@ -22,11 +22,9 @@ const Set<String> _financePaymentMethods = {
 // fresh one after Railway restarts or replaces the Postgres service.
 late Pool<void> _conn;
 final Directory _uploadImagesDir = Directory.fromUri(
-  File.fromUri(Platform.script)
-      .parent
-      .parent
-      .parent
-      .uri
+  (Platform.script.path.endsWith('.dart')
+          ? File.fromUri(Platform.script).parent.parent.parent.uri
+          : File.fromUri(Platform.script).parent.uri)
       .resolve('UPLOAD/IMAGES/'),
 );
 
