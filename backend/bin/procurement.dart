@@ -30,7 +30,7 @@ Future<List<Map<String, dynamic>>> _procurementDemand() async {
     UNION ALL
     SELECT o.store_code,COALESCE(s.name,o.store_code),o.order_date::text,
       d->>'code',COALESCE(d->>'nameCN',r.name_cn,d->>'code'),
-      COALESCE(d->>'nameEN',r.name_en,''),COALESCE(r.specification,''),
+      COALESCE(d->>'nameEN',r.name_en,''),COALESCE(d->>'description',r.specification,''),
       d->>'orderQuantity',COALESCE(r.primary_supplier_code,''),
       COALESCE(p.name,'未指定供应商'),'点货',o.id::text,COALESCE(o.owner_username,'历史记录')
     FROM stock_orders o
@@ -40,7 +40,7 @@ Future<List<Map<String, dynamic>>> _procurementDemand() async {
     LEFT JOIN raw_materials r ON r.code=d->>'code'
     LEFT JOIN suppliers p ON p.code=r.primary_supplier_code
     WHERE o.is_deleted=FALSE AND o.is_confirmed=TRUE AND o.store_code IS NOT NULL
-      AND COALESCE(d->>'categorySelected','true')='true'
+      AND COALESCE(d->>'categorySelected',d->>'orderToday','true')='true'
     ''');
   final groups = <String, Map<String, dynamic>>{};
   for (final r in rows) {
