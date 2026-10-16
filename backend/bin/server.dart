@@ -10,6 +10,7 @@ import 'package:postgres/postgres.dart';
 import 'package:crypto/crypto.dart';
 part 'mall.dart';
 part 'material_settings.dart';
+part 'procurement.dart';
 
 const Set<String> _financePaymentMethods = {
   '店里卡',
@@ -695,6 +696,7 @@ Future<void> initDb() async {
   // Seed or synchronize admin user to lowercase credentials
   await _initMaterialSettings();
   await _initMall();
+  await _initProcurement();
   final hashedPw = sha256.convert(utf8.encode('admin')).toString();
   final res = await _conn.execute(
     'SELECT id, username FROM users WHERE LOWER(username) = LOWER(\$1)',
@@ -822,6 +824,8 @@ Middleware corsMiddleware() {
 final _router = Router()
   ..get('/api/mall/products', _mallProducts)
   ..post('/api/mall/orders', _mallCreateOrder)
+  ..get('/api/mall/procurement', _procurementOrders)
+  ..put('/api/mall/procurement/items', _procurementUpdate)
   ..get('/api/mall/orders', _mallOrders)
   ..put('/api/mall/orders/<id>/items/<itemId>', _mallUpdateItem)
   ..post('/api/login', _login)

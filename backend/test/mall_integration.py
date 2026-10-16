@@ -99,6 +99,60 @@ try:
     api('/api/raw-materials',{'code':'TEST_NEW','nameCN':'New','locationCode':'LOC_TEST'},token=admin)
     raw=next(x for x in api('/api/raw-materials',token=admin)['materials'] if x['code']=='TEST_NEW')
     assert raw['locationName']=='Cold storage' and raw['hiddenStoreCodes']==[]
+    # Daily procurement merges different submitters and confirmed stock orders.
+    sql("INSERT INTO suppliers(code,name) VALUES('PUR_A','Supplier Alpha'),('PUR_B','Supplier Beta'); UPDATE raw_materials SET specification=CASE WHEN code='TEST_A' THEN 'bag' ELSE 'box' END,primary_supplier_code=CASE WHEN code='TEST_A' THEN 'PUR_A' ELSE 'PUR_B' END WHERE code IN ('TEST_A','TEST_B'); UPDATE mall_orders SET created_at='2026-10-16 18:00:00'")
+    more={'submissionKey':'daily-admin','storeCode':'S001','items':[{'code':'TEST_A','quantity':1.5}]}
+    api('/api/mall/orders',more,token=admin)
+    api('/api/mall/orders',more,token=admin) # idempotent retry
+    api('/api/mall/orders',{'submissionKey':'other-store','storeCode':'S002','items':[{'code':'TEST_B','quantity':5}]},token=admin)
+    sql("UPDATE mall_orders SET created_at='2026-10-16 18:00:00'")
+    detail=[{'code':'TEST_A','nameCN':'Stock A','nameEN':'Stock English','orderQuantity':3,'categorySelected':True}]
+    stock=api('/api/stock-orders',{'orderDate':'2026-10-16','storeCode':'S001','details':detail,'isConfirmed':True},token=a)['id']
+    api('/api/stock-orders',{'orderDate':'2026-10-16','storeCode':'S001','details':detail,'isConfirmed':False},token=a)
+    api('/api/stock-orders',{'orderDate':'2026-10-15','storeCode':'S001','details':detail,'isConfirmed':True},token=a)
+    def daily():return api('/api/mall/procurement',token=admin)['orders']
+    def own_day():return next(x for x in daily() if x['storeCode']=='S001' and x['date']=='2026-10-16')
+    api('/api/mall/procurement',expect=401)
+    api('/api/mall/procurement',token=a,expect=403)
+    assert len(daily())==3
+    day=own_day(); assert day['purchased'] is False and day['purchasedCount']==0
+    assert len(day['items'])==2
+    first=next(x for x in day['items'] if x['code']=='TEST_A')
+    assert first['demandQuantity']==7 and first['purchaseQuantity']==7
+    assert first['supplierName']=='Supplier Alpha' and len(first['sources'])==3
+    assert set(first['submitters'])=={'admin','mall_a'}
+    def set_line(line,q,p,expect=200):
+        return api('/api/mall/procurement/items',{'storeCode':line['storeCode'],'date':line['date'],'code':line['code'],'unit':line['unit'],'expectedDemand':line['demandQuantity'],'purchaseQuantity':q,'purchased':p},token=admin,method='PUT',expect=expect)
+    for invalid in [-1,.001,100000001]:set_line(first,invalid,False,400)
+    forged={**first,'storeCode':'MISSING'};set_line(forged,1,True,404)
+    set_line({**first,'demandQuantity':999},1,True,409)
+    set_line(first,6.25,False)
+    assert next(x for x in own_day()['items'] if x['code']=='TEST_A')['purchaseQuantity']==6.25
+    set_line(first,6.25,True)
+    assert own_day()['purchased'] is False and own_day()['purchasedCount']==1
+    second=next(x for x in day['items'] if x['code']=='TEST_B')
+    set_line(second,3,True)
+    assert own_day()['purchased'] is True
+    assert next(x for x in daily() if x['storeCode']=='S002')['purchased'] is False
+    # Progress survives an actual backend restart.
+    subprocess.run(['taskkill','/PID',str(server.pid),'/T','/F'],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL);server.wait(timeout=10)
+    server=subprocess.Popen([str(runtime/'flutter/bin/cache/dart-sdk/bin/dart.exe'),'run','bin/server.dart'],cwd=project/'backend',env=serverenv,stdout=log,stderr=log)
+    for _ in range(40):
+        try:api('/api/test');break
+        except Exception:time.sleep(.5)
+    assert own_day()['purchased'] is True
+    new_id=api('/api/mall/orders',{'submissionKey':'late-demand','storeCode':'S001','items':[{'code':'TEST_A','quantity':2}]},token=admin)['id']
+    sql("UPDATE mall_orders SET created_at='2026-10-16 18:00:00' WHERE id="+str(new_id))
+    assert own_day()['purchased'] is False
+    first=next(x for x in own_day()['items'] if x['code']=='TEST_A')
+    assert first['demandQuantity']==9 and first['purchaseQuantity']==6.25 and first['purchased'] is False
+    set_line(first,9,True)
+    assert own_day()['purchased'] is True
+    set_line(first,9,False)
+    assert own_day()['purchased'] is False
+    sql('UPDATE stock_orders SET is_deleted=TRUE WHERE id='+str(stock))
+    assert next(x for x in own_day()['items'] if x['code']=='TEST_A')['demandQuantity']==6
+    print('PASS: daily aggregation across submitters/sources, store/date isolation, supplier metadata, draft exclusion, quantity editing, all-items completion, new demand reopening, validation, restart persistence')
     print('PASS: notes/location database persistence, store filtering, stale submission rejection, new-store defaults')
     print('PASS: authentication, store binding, owner isolation, admin permissions, quantities, atomic rollback, idempotency, historical snapshots, procurement/out-of-stock/task transitions, task protection')
 finally:

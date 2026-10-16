@@ -14,6 +14,7 @@ import 'system_management_page.dart';
 import 'todo_page.dart';
 import 'user_management_page.dart';
 import 'mall_page.dart';
+import 'procurement_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -124,6 +125,12 @@ class _AdminPageState extends State<AdminPage> {
         initialTab: _sectionTabs[9] ?? 0,
       ),
     },
+    {
+      'index': 10,
+      'icon': Icons.receipt_long,
+      'label': _t('采购单', 'Purchase Orders'),
+      'page': const ProcurementPage(),
+    },
   ];
 
   List<String> _sectionLabels(int index) => switch (index) {
@@ -161,6 +168,7 @@ class _AdminPageState extends State<AdminPage> {
     7 => [_t('任务列表', 'Task List'), _t('添加任务', 'Add Task')],
     8 => [_t('用户列表', 'Users'), _t('新增用户', 'Add User')],
     9 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
+    10 => [_t('采购详情', 'Purchase Details')],
     _ => const [],
   };
 
