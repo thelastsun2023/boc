@@ -273,6 +273,7 @@ class _ProcurementPageState extends State<ProcurementPage> {
                 : visible.isEmpty
                 ? const Center(child: Text('暂无符合条件的采购单'))
                 : ListView.builder(
+                    key: const PageStorageKey('procurement-order-list'),
                     itemCount: visible.length,
                     itemBuilder: (context, index) {
                       final order = visible[index],
@@ -301,6 +302,10 @@ class _ProcurementPageState extends State<ProcurementPage> {
                               ),
                             ),
                             SingleChildScrollView(
+                              // Keep scroll offsets separate from ExpansionTile's boolean state.
+                              key: PageStorageKey(
+                                'procurement-items-scroll-${order['storeCode']}-${order['date']}',
+                              ),
                               scrollDirection: Axis.horizontal,
                               child: SizedBox(
                                 width: 1080,

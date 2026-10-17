@@ -103,4 +103,100 @@ void main() {
       expect(tester.takeException(), isNull);
     }, () => client);
   });
+  testWidgets('reopen procurement after horizontal scrolling and collapse', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(850, 1000);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    SessionService().token = 'test-session';
+    addTearDown(SessionService().clear);
+    final client = MockClient(
+      (_) async => http.Response(
+        jsonEncode({
+          'orders': [
+            {
+              'storeCode': 'S001',
+              'storeName': 'Store One',
+              'date': '2026-10-16',
+              'purchased': false,
+              'purchasedCount': 0,
+              'items': [
+                {
+                  'storeCode': 'S001',
+                  'storeName': 'Store One',
+                  'date': '2026-10-16',
+                  'code': 'RAW1',
+                  'nameCN': '商品',
+                  'nameEN': 'Product',
+                  'unit': 'bag',
+                  'supplierCode': 'SUP',
+                  'supplierName': 'Supplier',
+                  'demandQuantity': 2,
+                  'purchaseQuantity': 2,
+                  'purchased': false,
+                  'sources': [],
+                  'submitters': [],
+                },
+              ],
+            },
+          ],
+        }),
+        200,
+        headers: {'content-type': 'application/json; charset=utf-8'},
+      ),
+    );
+    var opened = true;
+    await http.runWithClient(() async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: StatefulBuilder(
+            builder: (context, change) => Scaffold(
+              body: Column(
+                children: [
+                  Row(
+                    children: [
+                      TextButton(
+                        onPressed: () => change(() => opened = true),
+                        child: const Text('采购单'),
+                      ),
+                      TextButton(
+                        onPressed: () => change(() => opened = false),
+                        child: const Text('其他页面'),
+                      ),
+                    ],
+                  ),
+                  Expanded(
+                    child: opened
+                        ? const ProcurementPage()
+                        : const Text('其他内容'),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final horizontal = find.byWidgetPredicate(
+        (w) =>
+            w is SingleChildScrollView && w.scrollDirection == Axis.horizontal,
+      );
+      await tester.drag(horizontal, const Offset(-180, 0));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('其他页面'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('采购单'));
+      await tester.pumpAndSettle();
+      expect(tester.takeException(), isNull);
+      expect(find.text('Product'), findsOneWidget);
+      for (var i = 0; i < 2; i++) {
+        await tester.tap(find.text('2026-10-16 · Store One'));
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      }
+      expect(find.text('Product'), findsOneWidget);
+    }, () => client);
+  });
 }
