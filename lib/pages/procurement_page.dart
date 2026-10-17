@@ -433,6 +433,15 @@ class _ProcurementItemState extends State<_ProcurementItem> {
   @override
   Widget build(BuildContext context) {
     final item = widget.item, purchased = item['purchased'] == true;
+    final insufficient =
+        purchased &&
+        (item['purchaseQuantity'] as num) < (item['demandQuantity'] as num);
+    final statusColor = !purchased
+        ? Colors.red.shade700
+        : insufficient
+        ? Colors.yellow.shade600
+        : Colors.green.shade700;
+    final foreground = insufficient ? Colors.black87 : Colors.white;
     return Container(
       decoration: const BoxDecoration(
         border: Border(top: BorderSide(color: Color(0xffeeeeee))),
@@ -505,12 +514,27 @@ class _ProcurementItemState extends State<_ProcurementItem> {
             )
           else
             ActionChip(
+              backgroundColor: statusColor,
+              labelStyle: TextStyle(
+                color: foreground,
+                fontWeight: FontWeight.bold,
+              ),
               avatar: Icon(
-                purchased ? Icons.check_circle : Icons.radio_button_unchecked,
-                color: purchased ? Colors.green : Colors.grey,
+                !purchased
+                    ? Icons.radio_button_unchecked
+                    : insufficient
+                    ? Icons.warning_amber_rounded
+                    : Icons.check_circle,
+                color: foreground,
                 size: 18,
               ),
-              label: Text(purchased ? '已采购' : '未采购'),
+              label: Text(
+                !purchased
+                    ? '未采购'
+                    : insufficient
+                    ? '采购不足'
+                    : '已采购',
+              ),
               onPressed: () => _save(!purchased),
             ),
         ],

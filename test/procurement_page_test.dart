@@ -70,6 +70,12 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Product 0'), findsOneWidget);
       expect(find.text('Product 1'), findsOneWidget);
+      expect(
+        tester
+            .widget<ActionChip>(find.byType(ActionChip).first)
+            .backgroundColor,
+        Colors.red.shade700,
+      );
       await tester.enterText(
         find.widgetWithText(TextField, '采购数量').first,
         '4.5',
@@ -81,10 +87,39 @@ void main() {
       await tester.tap(find.widgetWithText(ActionChip, '未采购').first);
       await tester.pumpAndSettle();
       expect(lines[0]['purchased'], true);
+      expect(
+        tester
+            .widget<ActionChip>(find.widgetWithText(ActionChip, '已采购'))
+            .backgroundColor,
+        Colors.green.shade700,
+      );
       expect(find.textContaining('未采购  ·  1 / 2'), findsOneWidget);
       await tester.tap(find.widgetWithText(ActionChip, '未采购'));
       await tester.pumpAndSettle();
       expect(find.textContaining('已采购  ·  2 / 2'), findsOneWidget);
+      expect(
+        tester.widget<ActionChip>(find.byType(ActionChip).last).backgroundColor,
+        Colors.green.shade700,
+      );
+      await tester.enterText(find.widgetWithText(TextField, '采购数量').first, '1');
+      await tester.tap(find.byTooltip('保存采购数量').first);
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ActionChip>(find.widgetWithText(ActionChip, '采购不足'))
+            .backgroundColor,
+        Colors.yellow.shade600,
+      );
+      await tester.tap(find.widgetWithText(ActionChip, '采购不足'));
+      await tester.pumpAndSettle();
+      expect(
+        tester
+            .widget<ActionChip>(find.widgetWithText(ActionChip, '未采购'))
+            .backgroundColor,
+        Colors.red.shade700,
+      );
+      await tester.tap(find.widgetWithText(ActionChip, '未采购'));
+      await tester.pumpAndSettle();
       await tester.tap(find.byType(DropdownButtonFormField<String>).at(3));
       await tester.pumpAndSettle();
       await tester.tap(find.text('采购单位 ↓').last);
