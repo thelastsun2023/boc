@@ -966,6 +966,104 @@ class SystemService {
     return _delete('/api/users/$encodedUsername', 'Failed to delete user');
   }
 
+  Future<List<Map<String, dynamic>>> getTemperatureDevices() async {
+    final data = await _get(
+      '/api/temperature-devices',
+      'Failed to get temperature devices',
+    );
+    return List<Map<String, dynamic>>.from(data['devices'] ?? []);
+  }
+
+  Future<bool> addTemperatureDevice({
+    required String name,
+    required String location,
+    required double upperLimit,
+    required double lowerLimit,
+    Uint8List? imageBytes,
+    String? imageFileName,
+  }) async {
+    final imagePath = await _uploadImage(imageBytes, imageFileName);
+    return _post('/api/temperature-devices', {
+      'name': name,
+      'location': location,
+      'upperLimit': upperLimit,
+      'lowerLimit': lowerLimit,
+      'imagePath': imagePath,
+    }, 'Failed to add temperature device');
+  }
+
+  Future<bool> updateTemperatureDevice({
+    required int id,
+    required String name,
+    required String location,
+    required double upperLimit,
+    required double lowerLimit,
+    Uint8List? imageBytes,
+    String? imageFileName,
+    bool removeImage = false,
+  }) async {
+    final imagePath = await _uploadImage(imageBytes, imageFileName);
+    final payload = <String, dynamic>{
+      'name': name,
+      'location': location,
+      'upperLimit': upperLimit,
+      'lowerLimit': lowerLimit,
+    };
+    if (imagePath != null || removeImage) {
+      payload['imagePath'] = imagePath;
+    }
+    return _put(
+      '/api/temperature-devices/$id',
+      payload,
+      'Failed to update temperature device',
+    );
+  }
+
+  Future<bool> deleteTemperatureDevice(int id) {
+    return _delete(
+      '/api/temperature-devices/$id',
+      'Failed to delete temperature device',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getTemperatureRecords({
+    required int deviceId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final query = Uri(queryParameters: {
+      'deviceId': '$deviceId',
+      'from': from.toIso8601String(),
+      'to': to.toIso8601String(),
+    }).query;
+    final data = await _get(
+      '/api/temperature-records?$query',
+      'Failed to get temperature records',
+    );
+    return List<Map<String, dynamic>>.from(data['records'] ?? []);
+  }
+
+  Future<bool> addTemperatureRecord({
+    required int deviceId,
+    required double temperature,
+    required DateTime recordedAt,
+    String note = '',
+  }) {
+    return _post('/api/temperature-records', {
+      'deviceId': deviceId,
+      'temperature': temperature,
+      'recordedAt': recordedAt.toIso8601String(),
+      'note': note,
+    }, 'Failed to add temperature record');
+  }
+
+  Future<bool> deleteTemperatureRecord(int id) {
+    return _delete(
+      '/api/temperature-records/$id',
+      'Failed to delete temperature record',
+    );
+  }
+
   Future<Map<String, dynamic>> _get(String path, String message) async {
     try {
       final response = await http.get(

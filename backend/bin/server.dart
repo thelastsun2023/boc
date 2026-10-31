@@ -147,6 +147,8 @@ const List<String> _serialIdTables = [
   'finance_records',
   'todo_tasks',
   'stock_orders',
+  'temperature_devices',
+  'temperature_records',
   'kitchen_tools',
   'processes',
   'tools',
@@ -399,6 +401,31 @@ Future<void> initDb() async {
     VALUES (1)
     ON CONFLICT (id) DO NOTHING
   ''');
+
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS temperature_devices (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      location VARCHAR(255) NOT NULL,
+      upper_limit NUMERIC(8, 2) NOT NULL,
+      lower_limit NUMERIC(8, 2) NOT NULL,
+      image_path VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS temperature_records (
+      id SERIAL PRIMARY KEY,
+      device_id INTEGER NOT NULL REFERENCES temperature_devices(id) ON DELETE CASCADE,
+      temperature NUMERIC(8, 2) NOT NULL,
+      recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      note TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  await _conn.execute(
+    'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
+  );
 
   // Create semi_products table
   await _conn.execute('''
@@ -874,6 +901,14 @@ final _router = Router()
   ..get('/api/stores', _getStores)
   ..put('/api/stores/<code>', _updateStore)
   ..delete('/api/stores/<code>', _deleteStore)
+  // Temperature devices and readings
+  ..post('/api/temperature-devices', _addTemperatureDevice)
+  ..get('/api/temperature-devices', _getTemperatureDevices)
+  ..put('/api/temperature-devices/<id>', _updateTemperatureDevice)
+  ..delete('/api/temperature-devices/<id>', _deleteTemperatureDevice)
+  ..post('/api/temperature-records', _addTemperatureRecord)
+  ..get('/api/temperature-records', _getTemperatureRecords)
+  ..delete('/api/temperature-records/<id>', _deleteTemperatureRecord)
   // Semi Products
   ..post('/api/semi-products', _addSemiProduct)
   ..get('/api/semi-products', _getSemiProducts)
@@ -5163,6 +5198,293 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
+    );
+  }
+}
+
+// Temperature device and record APIs
+Future<Response> _addTemperatureDevice(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final name = _normalizedOptionalString(json['name']);
+    final location = _normalizedOptionalString(json['location']);
+    final upperLimit = (json['upperLimit'] as num?)?.toDouble();
+    final lowerLimit = (json['lowerLimit'] as num?)?.toDouble();
+    final imagePath = _normalizedOptionalString(json['imagePath']);
+    if (name == null || location == null || upperLimit == null || lowerLimit == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    if (lowerLimit >= upperLimit) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'lowerLimit must be below upperLimit'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''
+      INSERT INTO temperature_devices (name, location, upper_limit, lower_limit, image_path)
+      VALUES (\$1, \$2, \$3, \$4, \$5)
+      RETURNING id
+      ''',
+      parameters: [name, location, upperLimit, lowerLimit, imagePath],
+    );
+    return Response.ok(
+      jsonEncode({'success': true, 'id': result.first[0]}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _getTemperatureDevices(Request request) async {
+  try {
+    final result = await _conn.execute('''
+      SELECT d.id, d.name, d.location, d.upper_limit, d.lower_limit,
+             d.image_path, latest.temperature,
+             TO_CHAR(latest.recorded_at, 'YYYY-MM-DD HH24:MI:SS')
+      FROM temperature_devices d
+      LEFT JOIN LATERAL (
+        SELECT temperature, recorded_at
+        FROM temperature_records
+        WHERE device_id = d.id
+        ORDER BY recorded_at DESC, id DESC
+        LIMIT 1
+      ) latest ON TRUE
+      ORDER BY d.name ASC, d.id ASC
+    ''');
+    final devices = result.map((row) => {
+      'id': row[0],
+      'name': row[1],
+      'location': row[2],
+      'upperLimit': double.tryParse(row[3].toString()),
+      'lowerLimit': double.tryParse(row[4].toString()),
+      'imagePath': row[5],
+      'imageUrl': _imageUrlFromPath(row[5] as String?),
+      'latestTemperature': row[6] == null ? null : double.tryParse(row[6].toString()),
+      'latestRecordedAt': row[7],
+    }).toList();
+    return Response.ok(
+      jsonEncode({'devices': devices}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _updateTemperatureDevice(Request request, String id) async {
+  try {
+    final deviceId = int.tryParse(id);
+    if (deviceId == null) return Response.badRequest(body: 'Invalid id');
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final name = _normalizedOptionalString(json['name']);
+    final location = _normalizedOptionalString(json['location']);
+    final upperLimit = (json['upperLimit'] as num?)?.toDouble();
+    final lowerLimit = (json['lowerLimit'] as num?)?.toDouble();
+    if (name == null || location == null || upperLimit == null || lowerLimit == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    if (lowerLimit >= upperLimit) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'lowerLimit must be below upperLimit'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final existing = await _conn.execute(
+      'SELECT image_path FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (existing.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final hasImagePath = json.containsKey('imagePath');
+    final imagePath = _normalizedOptionalString(json['imagePath']);
+    final result = await _conn.execute(
+      hasImagePath
+          ? '''UPDATE temperature_devices
+               SET name = \$1, location = \$2, upper_limit = \$3, lower_limit = \$4, image_path = \$5
+               WHERE id = \$6'''
+          : '''UPDATE temperature_devices
+               SET name = \$1, location = \$2, upper_limit = \$3, lower_limit = \$4
+               WHERE id = \$5''',
+      parameters: hasImagePath
+          ? [name, location, upperLimit, lowerLimit, imagePath, deviceId]
+          : [name, location, upperLimit, lowerLimit, deviceId],
+    );
+    if (hasImagePath) {
+      final oldImagePath = existing.first[0] as String?;
+      if (oldImagePath != null && oldImagePath != imagePath) {
+        await _deleteUploadedImage(oldImagePath);
+      }
+    }
+    return Response.ok(
+      jsonEncode({'success': result.affectedRows > 0}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _deleteTemperatureDevice(Request request, String id) async {
+  try {
+    final deviceId = int.tryParse(id);
+    if (deviceId == null) return Response.badRequest(body: 'Invalid id');
+    final existing = await _conn.execute(
+      'SELECT image_path FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (existing.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    await _conn.execute(
+      'DELETE FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    await _deleteUploadedImage(existing.first[0] as String?);
+    return Response.ok(
+      jsonEncode({'success': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _addTemperatureRecord(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final deviceId = (json['deviceId'] as num?)?.toInt();
+    final temperature = (json['temperature'] as num?)?.toDouble();
+    final recordedAtText = _normalizedOptionalString(json['recordedAt']);
+    final note = _normalizedOptionalString(json['note']);
+    if (deviceId == null || temperature == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final recordedAt = recordedAtText == null
+        ? DateTime.now()
+        : DateTime.tryParse(recordedAtText);
+    if (recordedAt == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid recordedAt'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''INSERT INTO temperature_records (device_id, temperature, recorded_at, note)
+         VALUES (\$1, \$2, \$3, \$4) RETURNING id''',
+      parameters: [deviceId, temperature, recordedAt, note],
+    );
+    return Response.ok(
+      jsonEncode({'success': true, 'id': result.first[0]}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _getTemperatureRecords(Request request) async {
+  try {
+    final query = request.requestedUri.queryParameters;
+    final deviceId = int.tryParse(query['deviceId'] ?? '');
+    if (deviceId == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing or invalid deviceId'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final from = DateTime.tryParse(query['from'] ?? '');
+    final to = DateTime.tryParse(query['to'] ?? '');
+    final sql = StringBuffer('''
+      SELECT id, device_id, temperature,
+             TO_CHAR(recorded_at, 'YYYY-MM-DD HH24:MI:SS'), note
+      FROM temperature_records
+      WHERE device_id = \$1
+    ''');
+    final parameters = <dynamic>[deviceId];
+    if (from != null) {
+      sql.write(' AND recorded_at >= \$${parameters.length + 1}');
+      parameters.add(from);
+    }
+    if (to != null) {
+      sql.write(' AND recorded_at < \$${parameters.length + 1}');
+      parameters.add(to);
+    }
+    sql.write(' ORDER BY recorded_at ASC, id ASC');
+    final result = await _conn.execute(sql.toString(), parameters: parameters);
+    final records = result.map((row) => {
+      'id': row[0],
+      'deviceId': row[1],
+      'temperature': double.tryParse(row[2].toString()),
+      'recordedAt': row[3],
+      'note': row[4],
+    }).toList();
+    return Response.ok(
+      jsonEncode({'records': records}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _deleteTemperatureRecord(Request request, String id) async {
+  try {
+    final recordId = int.tryParse(id);
+    if (recordId == null) return Response.badRequest(body: 'Invalid id');
+    final result = await _conn.execute(
+      'DELETE FROM temperature_records WHERE id = \$1',
+      parameters: [recordId],
+    );
+    if (result.affectedRows == 0) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature record not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    return Response.ok(
+      jsonEncode({'success': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
     );
   }
 }

@@ -15,6 +15,7 @@ import 'todo_page.dart';
 import 'user_management_page.dart';
 import 'mall_page.dart';
 import 'procurement_page.dart';
+import 'temperature_page.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -38,10 +39,10 @@ class _AdminPageState extends State<AdminPage> {
       'label': _t('系统管理', 'System Management'),
       'page': SystemManagementPage(
         key: ValueKey(_sectionKeys[0] ?? 0),
-        initialTabIndex: (_sectionTabs[0] ?? 0) < 9
+        initialTabIndex: (_sectionTabs[0] ?? 0) < 10
             ? (_sectionTabs[0] ?? 0)
             : 0,
-        initialAction: (_sectionTabs[0] ?? 0) >= 9 ? (_sectionTabs[0]! - 8) : 0,
+        initialAction: (_sectionTabs[0] ?? 0) >= 10 ? (_sectionTabs[0]! - 9) : 0,
       ),
     },
     {
@@ -131,6 +132,12 @@ class _AdminPageState extends State<AdminPage> {
       'label': _t('采购单', 'Purchase Orders'),
       'page': const ProcurementPage(),
     },
+    {
+      'index': 11,
+      'icon': Icons.device_thermostat,
+      'label': _t('温度记录', 'Temperature Records'),
+      'page': const TemperaturePage(),
+    },
   ];
 
   List<String> _sectionLabels(int index) => switch (index) {
@@ -144,6 +151,7 @@ class _AdminPageState extends State<AdminPage> {
       _t('工艺', 'Processes'),
       _t('工具', 'Tools'),
       _t('提醒', 'Reminders'),
+      _t('温度设备', 'Temperature Devices'),
       _t('原材料分类', 'Material Categories'),
       _t('存放位置', 'Storage Locations'),
     ],
@@ -169,6 +177,7 @@ class _AdminPageState extends State<AdminPage> {
     8 => [_t('用户列表', 'Users'), _t('新增用户', 'Add User')],
     9 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
     10 => [_t('采购详情', 'Purchase Details')],
+    11 => [_t('设备温度', 'Device Temperatures')],
     _ => const [],
   };
 

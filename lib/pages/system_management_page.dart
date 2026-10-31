@@ -40,6 +40,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   final List<Map<String, dynamic>> _kitchenTools = [];
   final List<Map<String, dynamic>> _processes = [];
   final List<Map<String, dynamic>> _tools = [];
+  final List<Map<String, dynamic>> _temperatureDevices = [];
   final List<TextEditingController> _reminderPhoneControllers = [];
 
   bool _isLoading = true;
@@ -198,9 +199,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   @override
   void initState() {
     super.initState();
-    final initialIndex = widget.initialTabIndex.clamp(0, 8);
+    final initialIndex = widget.initialTabIndex.clamp(0, 9);
     _tabController = TabController(
-      length: 9,
+      length: 10,
       vsync: this,
       initialIndex: initialIndex,
     );
@@ -236,6 +237,8 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       final kitchenTools = await _systemService.getKitchenTools();
       final processes = await _systemService.getProcesses();
       final tools = await _systemService.getTools();
+      final temperatureDevices =
+          await _systemService.getTemperatureDevices();
       final smsSettings = await _systemService.getSmsSettings();
 
       if (!mounted) {
@@ -276,6 +279,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _tools
           ..clear()
           ..addAll(tools);
+        _temperatureDevices
+          ..clear()
+          ..addAll(temperatureDevices);
         for (final controller in _reminderPhoneControllers) {
           controller.dispose();
         }
@@ -2485,6 +2491,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _buildProcessTab(),
         _buildToolTab(),
         _buildReminderTab(),
+        _buildTemperatureDeviceTab(),
       ],
     );
   }
@@ -2510,6 +2517,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
             Tab(text: '工艺'),
             Tab(text: '工具'),
             Tab(text: '提醒'),
+            Tab(text: '温度设备'),
           ],
         ),
         actions: [
@@ -2991,6 +2999,279 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 ),
                                 icon: const Icon(Icons.delete_outline),
                                 tooltip: 'Delete',
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showTemperatureDeviceDialog({
+    Map<String, dynamic>? item,
+  }) async {
+    final nameController = TextEditingController(
+      text: item?['name'] as String? ?? '',
+    );
+    final locationController = TextEditingController(
+      text: item?['location'] as String? ?? '',
+    );
+    final upperController = TextEditingController(
+      text: item?['upperLimit']?.toString() ?? '',
+    );
+    final lowerController = TextEditingController(
+      text: item?['lowerLimit']?.toString() ?? '',
+    );
+    ({Uint8List bytes, String fileName})? pickedImage;
+    var removeImage = false;
+    var saving = false;
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(item == null ? '新增温度设备' : '编辑温度设备'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: '名称 *'),
+                  ),
+                  TextField(
+                    controller: locationController,
+                    decoration: const InputDecoration(labelText: '位置 *'),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: lowerController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '下限（°C）*',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: upperController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '上限（°C）*',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      if (pickedImage != null)
+                        Image.memory(
+                          pickedImage!.bytes,
+                          width: 90,
+                          height: 90,
+                          fit: BoxFit.cover,
+                        )
+                      else
+                        ProductImage(
+                          url: removeImage
+                              ? null
+                              : item?['imageUrl'] as String? ??
+                                  item?['imagePath'] as String?,
+                          title: nameController.text,
+                          width: 90,
+                          height: 90,
+                        ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final picked = await _pickImageAsset();
+                                if (picked == null) return;
+                                setDialogState(() {
+                                  pickedImage = picked;
+                                  removeImage = false;
+                                });
+                              },
+                              icon: const Icon(Icons.image_outlined),
+                              label: const Text('选择图片（可选）'),
+                            ),
+                            if (item?['imagePath'] != null)
+                              CheckboxListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: removeImage,
+                                onChanged: (value) => setDialogState(() {
+                                  removeImage = value == true;
+                                  if (removeImage) pickedImage = null;
+                                }),
+                                title: const Text('移除现有图片'),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final name = nameController.text.trim();
+                      final location = locationController.text.trim();
+                      final upper = double.tryParse(upperController.text.trim());
+                      final lower = double.tryParse(lowerController.text.trim());
+                      if (name.isEmpty ||
+                          location.isEmpty ||
+                          upper == null ||
+                          lower == null ||
+                          lower >= upper) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('请填写完整，且下限必须小于上限'),
+                          ),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      try {
+                        final success = item == null
+                            ? await _systemService.addTemperatureDevice(
+                                name: name,
+                                location: location,
+                                upperLimit: upper,
+                                lowerLimit: lower,
+                                imageBytes: pickedImage?.bytes,
+                                imageFileName: pickedImage?.fileName,
+                              )
+                            : await _systemService.updateTemperatureDevice(
+                                id: item['id'] as int,
+                                name: name,
+                                location: location,
+                                upperLimit: upper,
+                                lowerLimit: lower,
+                                imageBytes: pickedImage?.bytes,
+                                imageFileName: pickedImage?.fileName,
+                                removeImage: removeImage,
+                              );
+                        if (context.mounted) Navigator.pop(context, success);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('保存失败：$e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) await _loadAllData();
+  }
+
+  Widget _buildTemperatureDeviceTab() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: () => _showTemperatureDeviceDialog(),
+                icon: const Icon(Icons.add),
+                label: const Text('新增温度设备'),
+              ),
+              const SizedBox(width: 12),
+              const Text('设备图片为可选项'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: _temperatureDevices.isEmpty
+                ? const Center(child: Text('暂无温度设备'))
+                : ListView.builder(
+                    itemCount: _temperatureDevices.length,
+                    itemBuilder: (context, index) {
+                      final item = _temperatureDevices[index];
+                      final latest =
+                          (item['latestTemperature'] as num?)?.toDouble();
+                      final low = (item['lowerLimit'] as num).toDouble();
+                      final high = (item['upperLimit'] as num).toDouble();
+                      final alert =
+                          latest != null && (latest < low || latest > high);
+                      return Card(
+                        child: ListTile(
+                          leading: ProductImage(
+                            url: item['imageUrl'] as String? ??
+                                item['imagePath'] as String?,
+                            title: item['name'] as String? ?? '',
+                            width: 64,
+                            height: 64,
+                          ),
+                          title: Text(item['name'] as String? ?? ''),
+                          subtitle: Text(
+                            '位置：${item['location']}  ·  范围：$low ～ $high °C'
+                            '${latest == null ? '' : '  ·  最新：${latest.toStringAsFixed(1)} °C'}',
+                          ),
+                          trailing: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (alert)
+                                const Icon(Icons.warning_amber, color: Colors.red),
+                              IconButton(
+                                onPressed: () =>
+                                    _showTemperatureDeviceDialog(item: item),
+                                icon: const Icon(Icons.edit_outlined),
+                                tooltip: '编辑',
+                              ),
+                              IconButton(
+                                onPressed: () => _confirmDelete(
+                                  title: item['name'] as String? ?? '温度设备',
+                                  onDelete: () => _systemService
+                                      .deleteTemperatureDevice(item['id'] as int),
+                                ),
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: '删除',
                               ),
                             ],
                           ),

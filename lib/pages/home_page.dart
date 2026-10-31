@@ -6,6 +6,7 @@ import 'login_page.dart';
 import 'stock_order_page.dart';
 import 'todo_page.dart';
 import 'mall_page.dart';
+import 'temperature_page.dart';
 
 class HomePage extends StatefulWidget {
   const HomePage({super.key});
@@ -21,6 +22,7 @@ class _HomePageState extends State<HomePage> {
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
+  int get _temperatureIndex => SessionService().canAccessMall ? 3 : 2;
 
   List<Map<String, dynamic>> _menuItems() => [
     {
@@ -51,14 +53,28 @@ class _HomePageState extends State<HomePage> {
           initialTab: _sectionTabs[2] ?? 0,
         ),
       },
+    {
+      'index': _temperatureIndex,
+      'icon': Icons.device_thermostat,
+      'label': _t('温度记录', 'Temperature Records'),
+      'page': const TemperaturePage(),
+    },
   ];
 
-  List<String> _sectionLabels(int index) => switch (index) {
-    0 => [_t('点货记录', 'Stock Order History'), _t('新建点货', 'New Stock Order')],
-    1 => [_t('任务列表', 'Task List'), _t('添加任务', 'Add Task')],
-    2 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
-    _ => const [],
-  };
+  List<String> _sectionLabels(int index) {
+    if (index == _temperatureIndex) {
+      return [_t('设备温度', 'Device Temperatures')];
+    }
+    return switch (index) {
+      0 => [
+          _t('点货记录', 'Stock Order History'),
+          _t('新建点货', 'New Stock Order'),
+        ],
+      1 => [_t('任务列表', 'Task List'), _t('添加任务', 'Add Task')],
+      2 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
+      _ => const [],
+    };
+  }
 
   void _logout() {
     SessionService().clear();
