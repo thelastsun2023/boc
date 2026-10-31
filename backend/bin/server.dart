@@ -4951,7 +4951,8 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
     final orderResult = await _conn.execute(
       '''
       SELECT so.details, so.is_confirmed, so.owner_username, so.store_code,
-             COALESCE(s.name, so.store_code, 'Unknown Store')
+             COALESCE(s.name, so.store_code, 'Unknown Store'),
+             TO_CHAR(so.order_date, 'YYYY-MM-DD')
       FROM stock_orders so
       LEFT JOIN stores s ON s.code = so.store_code
       WHERE so.id = \$1 AND so.is_deleted = FALSE
@@ -5001,6 +5002,7 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
             .toList()
         : <Map<String, dynamic>>[];
     final storeName = row[4] as String? ?? 'Unknown Store';
+    final orderDate = row[5] as String? ?? '';
     final supplierGroups = <String, List<Map<String, dynamic>>>{};
     for (final item in details) {
       final primary = _normalizedOptionalString(item['primarySupplierCode']);
@@ -5056,7 +5058,7 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
       }
 
       final reminder =
-          '$storeName：${scope.username} 订货了，请查看。';
+          '$storeName：${scope.username} 于 $orderDate 订货了，请查看。';
       if (entry.key == supplierGroups.keys.first) {
         for (final phone in reminderPhones) {
           results.add(await _sendTwilioMessage(phone, reminder));
