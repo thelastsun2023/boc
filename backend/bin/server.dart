@@ -5056,9 +5056,11 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
       }
 
       final reminder =
-          '$storeName 已向 $supplierName 订货 / $storeName placed an order with $supplierName. Reply STOP to opt out.';
-      for (final phone in reminderPhones) {
-        results.add(await _sendTwilioMessage(phone, reminder));
+          '$storeName：${scope.username} 订货了，请查看。';
+      if (entry.key == supplierGroups.keys.first) {
+        for (final phone in reminderPhones) {
+          results.add(await _sendTwilioMessage(phone, reminder));
+        }
       }
     }
 
