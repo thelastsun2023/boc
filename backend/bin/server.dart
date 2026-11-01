@@ -5233,7 +5233,17 @@ DateTime _albertaNow() {
     }
   }
   final isDaylight = !utc.isBefore(dstStart) && utc.isBefore(dstEnd);
-  return utc.subtract(Duration(hours: isDaylight ? 6 : 7));
+  final shifted = utc.subtract(Duration(hours: isDaylight ? 6 : 7));
+  return DateTime(
+    shifted.year,
+    shifted.month,
+    shifted.day,
+    shifted.hour,
+    shifted.minute,
+    shifted.second,
+    shifted.millisecond,
+    shifted.microsecond,
+  );
 }
 
 DateTime _dateOnly(DateTime value) =>
