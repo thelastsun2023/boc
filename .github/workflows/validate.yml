@@ -1,0 +1,49 @@
+name: Validate
+
+on:
+  push:
+    branches: [main, master]
+
+jobs:
+  flutter:
+    runs-on: ubuntu-latest
+    container: ghcr.io/cirruslabs/flutter:3.38.5
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check Flutter application
+        shell: bash
+        run: |
+          flutter pub get
+          set +e
+          output=$(flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1)
+          status=$?
+          echo "$output"
+          if [ $status -ne 0 ]; then
+            while IFS= read -r line; do
+              echo "::error::$line"
+            done <<< "$output"
+            exit $status
+          fi
+
+  backend:
+    runs-on: ubuntu-latest
+    container: dart:latest
+    defaults:
+      run:
+        working-directory: backend
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check backend
+        shell: bash
+        run: |
+          dart pub get
+          set +e
+          output=$(dart analyze bin/server.dart 2>&1)
+          status=$?
+          echo "$output"
+          if [ $status -ne 0 ]; then
+            while IFS= read -r line; do
+              echo "::error::$line"
+            done <<< "$output"
+            exit $status
+          fi
