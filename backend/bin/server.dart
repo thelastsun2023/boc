@@ -455,6 +455,18 @@ Future<void> initDb() async {
     WHERE r.device_id = d.id
       AND LOWER(TRIM(d.name)) = 'seafood refrigerator'
   ''');
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_display_cabinet_v1', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood insulated display cabinet'
+  ''');
 
   // Create semi_products table
   await _conn.execute('''
