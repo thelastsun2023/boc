@@ -281,6 +281,17 @@ Future<void> initDb() async {
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS secondary_supplier_code VARCHAR(50)',
   );
   await _conn.execute(
+    'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS supplier_codes TEXT[]',
+  );
+  await _conn.execute('''
+    UPDATE raw_materials
+    SET supplier_codes = ARRAY_REMOVE(
+      ARRAY[primary_supplier_code::text, secondary_supplier_code::text],
+      NULL
+    )
+    WHERE supplier_codes IS NULL
+  ''');
+  await _conn.execute(
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS category_code VARCHAR(50)',
   );
   await _conn.execute(
@@ -1728,6 +1739,28 @@ double _normalizedMinQuantity(dynamic value) {
 }
 
 // Raw Materials APIs
+List<String> _rawMaterialSupplierCodes(Map<String, dynamic> json) {
+  final values = json['supplierCodes'];
+  final candidates = values is List
+      ? values
+      : [json['primarySupplierCode'], json['secondarySupplierCode']];
+  final result = <String>[];
+  for (final value in candidates) {
+    final code = _normalizedOptionalString(value);
+    if (code != null && !result.contains(code)) result.add(code);
+  }
+  return result;
+}
+
+Future<bool> _rawMaterialSuppliersExist(List<String> codes) async {
+  if (codes.isEmpty) return true;
+  final result = await _conn.execute(
+    'SELECT COUNT(*) FROM suppliers WHERE code = ANY(\$1::text[])',
+    parameters: [codes],
+  );
+  return int.tryParse(result.first[0].toString()) == codes.length;
+}
+
 Future<Response> _addRawMaterial(Request request) async {
   final denied = await _requireUserAdmin(request);
   if (denied != null) return denied;
@@ -1740,12 +1773,12 @@ Future<Response> _addRawMaterial(Request request) async {
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
     final imagePath = _normalizedOptionalString(json['imagePath']);
-    final primarySupplierCode = _normalizedOptionalString(
-      json['primarySupplierCode'],
-    );
-    final secondarySupplierCode = _normalizedOptionalString(
-      json['secondarySupplierCode'],
-    );
+    final supplierCodes = _rawMaterialSupplierCodes(json);
+    if (!await _rawMaterialSuppliersExist(supplierCodes)) {
+      return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
+    }
+    final primarySupplierCode = supplierCodes.isEmpty ? null : supplierCodes[0];
+    final secondarySupplierCode = supplierCodes.length < 2 ? null : supplierCodes[1];
     final categoryCode = _normalizedOptionalString(json['categoryCode']);
     final locationCode = _normalizedOptionalString(json['locationCode']);
     final minQuantity = _normalizedMinQuantity(json['minQuantity']);
@@ -1773,10 +1806,11 @@ Future<Response> _addRawMaterial(Request request) async {
         image_path,
         primary_supplier_code,
         secondary_supplier_code,
+        supplier_codes,
         category_code,
         location_code,
         min_quantity
-      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10)
+      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11)
       ''',
       parameters: [
         finalCode,
@@ -1786,6 +1820,7 @@ Future<Response> _addRawMaterial(Request request) async {
         imagePath,
         primarySupplierCode,
         secondarySupplierCode,
+        supplierCodes,
         categoryCode,
         locationCode,
         minQuantity,
@@ -1840,7 +1875,14 @@ Future<Response> _getRawMaterials(Request request) async {
         rc.name_en,
         COALESCE(reg.name_cn, rl.name),
         rm.notes_rich,
-        ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code)
+        ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code),
+        COALESCE(
+          rm.supplier_codes,
+          ARRAY_REMOVE(
+            ARRAY[rm.primary_supplier_code::text, rm.secondary_supplier_code::text],
+            NULL
+          )
+        )
       FROM raw_materials rm
       LEFT JOIN suppliers ps ON ps.code = rm.primary_supplier_code
       LEFT JOIN suppliers ss ON ss.code = rm.secondary_supplier_code
@@ -1873,6 +1915,7 @@ Future<Response> _getRawMaterials(Request request) async {
               'locationName': row[14],
               'notesRich': row[15],
               'hiddenStoreCodes': row[16],
+              'supplierCodes': row[17],
             })
         .toList();
 
@@ -2054,12 +2097,12 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
     final specification = _normalizedOptionalString(json['specification']);
     final hasImagePath = json.containsKey('imagePath');
     final imagePath = _normalizedOptionalString(json['imagePath']);
-    final primarySupplierCode = _normalizedOptionalString(
-      json['primarySupplierCode'],
-    );
-    final secondarySupplierCode = _normalizedOptionalString(
-      json['secondarySupplierCode'],
-    );
+    final supplierCodes = _rawMaterialSupplierCodes(json);
+    if (!await _rawMaterialSuppliersExist(supplierCodes)) {
+      return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
+    }
+    final primarySupplierCode = supplierCodes.isEmpty ? null : supplierCodes[0];
+    final secondarySupplierCode = supplierCodes.length < 2 ? null : supplierCodes[1];
     final categoryCode = _normalizedOptionalString(json['categoryCode']);
     final locationCode = _normalizedOptionalString(json['locationCode']);
     final minQuantity = _normalizedMinQuantity(json['minQuantity']);
@@ -2108,10 +2151,11 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               image_path = \$4,
               primary_supplier_code = \$5,
               secondary_supplier_code = \$6,
-              category_code = \$7,
-              location_code = \$8,
-              min_quantity = \$9
-            WHERE code = \$10
+              supplier_codes = \$7,
+              category_code = \$8,
+              location_code = \$9,
+              min_quantity = \$10
+            WHERE code = \$11
             '''
           : '''
             UPDATE raw_materials
@@ -2121,10 +2165,11 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               specification = \$3,
               primary_supplier_code = \$4,
               secondary_supplier_code = \$5,
-              category_code = \$6,
-              location_code = \$7,
-              min_quantity = \$8
-            WHERE code = \$9
+              supplier_codes = \$6,
+              category_code = \$7,
+              location_code = \$8,
+              min_quantity = \$9
+            WHERE code = \$10
             ''',
       parameters: hasImagePath
           ? [
@@ -2134,6 +2179,7 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               finalImagePath,
               primarySupplierCode,
               secondarySupplierCode,
+              supplierCodes,
               categoryCode,
               locationCode,
               minQuantity,
@@ -2145,6 +2191,7 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               specification,
               primarySupplierCode,
               secondarySupplierCode,
+              supplierCodes,
               categoryCode,
               locationCode,
               minQuantity,
@@ -5098,10 +5145,18 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
     final orderDate = row[5] as String? ?? '';
     final supplierGroups = <String, List<Map<String, dynamic>>>{};
     for (final item in details) {
+      final rankedSuppliers = item['supplierCodes'];
+      String? rankedFirst;
+      if (rankedSuppliers is List) {
+        for (final value in rankedSuppliers) {
+          rankedFirst = _normalizedOptionalString(value);
+          if (rankedFirst != null) break;
+        }
+      }
       final primary = _normalizedOptionalString(item['primarySupplierCode']);
       final secondary =
           _normalizedOptionalString(item['secondarySupplierCode']);
-      final supplierCode = primary ?? secondary ?? 'UNKNOWN';
+      final supplierCode = rankedFirst ?? primary ?? secondary ?? 'UNKNOWN';
       supplierGroups.putIfAbsent(supplierCode, () => []).add(item);
     }
 

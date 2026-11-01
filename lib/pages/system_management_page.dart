@@ -785,8 +785,34 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         'nameEN': '',
       });
     }
-    String? primarySupplierCode = item?['primarySupplierCode'] as String?;
-    String? secondarySupplierCode = item?['secondarySupplierCode'] as String?;
+    final supplierCodes = <String>[];
+    final savedSupplierCodes = item?['supplierCodes'];
+    if (savedSupplierCodes is List) {
+      for (final value in savedSupplierCodes) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !supplierCodes.contains(code)) {
+          supplierCodes.add(code);
+        }
+      }
+    } else {
+      for (final value in [
+        item?['primarySupplierCode'],
+        item?['secondarySupplierCode'],
+      ]) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !supplierCodes.contains(code)) {
+          supplierCodes.add(code);
+        }
+      }
+    }
+    String supplierName(String code) {
+      for (final supplier in _suppliers) {
+        if (supplier['code'] == code) {
+          return supplier['name'] as String? ?? code;
+        }
+      }
+      return code;
+    }
     Uint8List? imageBytes = item?['imageBytes'] as Uint8List?;
     String? imageUrl = item?['imageUrl'] as String?;
     String? imageFileName = item?['imagePath'] as String?;
@@ -891,56 +917,136 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   ),
                   const SizedBox(height: 12),
                   if (_regions.isEmpty) const Text('请先在系统管理的区域中添加位置。'),
-                  DropdownButtonFormField<String>(
-                    initialValue: primarySupplierCode,
-                    decoration: const InputDecoration(labelText: '主要供应商'),
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('无主要供应商'),
-                      ),
-                      ..._suppliers.map(
-                        (supplier) => DropdownMenuItem<String>(
-                          value: supplier['code'] as String,
-                          child: Text(supplier['name'] as String? ?? '-'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '供应商顺序 / Supplier priority',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('排名第一的供应商用于订货；可用箭头调整顺序。'),
+                  ),
+                  const SizedBox(height: 8),
+                  if (supplierCodes.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('尚未添加供应商'),
+                    ),
+                  for (var index = 0; index < supplierCodes.length; index++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: index == 0
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).dividerColor,
+                          ),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 13,
+                              child: Text('${index + 1}'),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                supplierName(supplierCodes[index]),
+                              ),
+                            ),
+                            if (index == 0)
+                              const Padding(
+                                padding: EdgeInsets.only(right: 4),
+                                child: Text(
+                                  '订货',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '上移',
+                              onPressed: index == 0
+                                  ? null
+                                  : () => setDialogState(() {
+                                      final value = supplierCodes.removeAt(index);
+                                      supplierCodes.insert(index - 1, value);
+                                    }),
+                              icon: const Icon(Icons.arrow_upward),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '下移',
+                              onPressed: index == supplierCodes.length - 1
+                                  ? null
+                                  : () => setDialogState(() {
+                                      final value = supplierCodes.removeAt(index);
+                                      supplierCodes.insert(index + 1, value);
+                                    }),
+                              icon: const Icon(Icons.arrow_downward),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '移除',
+                              onPressed: () => setDialogState(
+                                () => supplierCodes.removeAt(index),
+                              ),
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                    onChanged: (value) {
-                      setDialogState(() {
-                        primarySupplierCode = value;
-                        if (secondarySupplierCode == value) {
-                          secondarySupplierCode = null;
-                        }
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: secondarySupplierCode,
-                    decoration: const InputDecoration(labelText: '次要供应商'),
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('无次要供应商'),
-                      ),
-                      ..._suppliers
-                          .where(
-                            (supplier) =>
-                                supplier['code'] != primarySupplierCode,
-                          )
-                          .map(
-                            (supplier) => DropdownMenuItem<String>(
-                              value: supplier['code'] as String,
-                              child: Text(supplier['name'] as String? ?? '-'),
-                            ),
-                          ),
-                    ],
-                    onChanged: (value) {
-                      setDialogState(() {
-                        secondarySupplierCode = value;
-                      });
-                    },
+                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: supplierCodes.length >= _suppliers.length
+                          ? null
+                          : () async {
+                              final available = _suppliers
+                                  .where(
+                                    (supplier) => !supplierCodes.contains(
+                                      supplier['code'],
+                                    ),
+                                  )
+                                  .toList();
+                              final selected = await showDialog<String>(
+                                context: context,
+                                builder: (pickerContext) => SimpleDialog(
+                                  title: const Text('添加供应商'),
+                                  children: available
+                                      .map(
+                                        (supplier) => SimpleDialogOption(
+                                          onPressed: () => Navigator.pop(
+                                            pickerContext,
+                                            supplier['code'] as String,
+                                          ),
+                                          child: Text(
+                                            supplier['name'] as String? ??
+                                                supplier['code'] as String,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              );
+                              if (selected != null) {
+                                setDialogState(
+                                  () => supplierCodes.add(selected),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.add),
+                      label: const Text('添加供应商'),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -1091,8 +1197,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 specificationController.text.trim(),
                                 categoryCode,
                                 locationCode,
-                                primarySupplierCode,
-                                secondarySupplierCode,
+                                List<String>.from(supplierCodes),
                                 minQuantity,
                                 imageBytes,
                                 imageFileName,
@@ -1105,8 +1210,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 specificationController.text.trim(),
                                 categoryCode,
                                 locationCode,
-                                primarySupplierCode,
-                                secondarySupplierCode,
+                                List<String>.from(supplierCodes),
                                 minQuantity,
                                 imageBytes,
                                 imageFileName,
@@ -2574,6 +2678,21 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         item['nameCN'] as String?,
                         item['nameEN'] as String?,
                       );
+                      final rankedSupplierCodes = <String>[
+                        for (final value in item['supplierCodes'] as List? ?? [])
+                          if (value?.toString().trim().isNotEmpty == true)
+                            value.toString().trim(),
+                      ];
+                      final rankedSupplierNames = [
+                        for (var i = 0; i < rankedSupplierCodes.length; i++)
+                          '${i + 1}. ${_suppliers.firstWhere(
+                            (supplier) =>
+                                supplier['code'] == rankedSupplierCodes[i],
+                            orElse: () => {
+                              'name': rankedSupplierCodes[i],
+                            },
+                          )['name']}',
+                      ].join('  ');
                       return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
@@ -2903,10 +3022,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                       'Location: ${_orDash(item['locationName'] as String?)}',
                                     ),
                                     Text(
-                                      'Primary Supplier: ${_orDash(item['primarySupplierName'] as String?)}',
-                                    ),
-                                    Text(
-                                      'Secondary Supplier: ${_orDash(item['secondarySupplierName'] as String?)}',
+                                      'Suppliers: ${rankedSupplierNames.isEmpty ? '-' : rankedSupplierNames}',
                                     ),
                                     Text(
                                       'Minimum Quantity: ${item['minQuantity'] ?? 0}',

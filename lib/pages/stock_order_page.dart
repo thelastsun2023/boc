@@ -142,10 +142,26 @@ class _StockOrderPageState extends State<StockOrderPage> {
   }
 
   String? _supplierCodeForItem(Map<String, dynamic> item) {
+    final supplierCodes = item['supplierCodes'];
+    if (supplierCodes is List) {
+      for (final value in supplierCodes) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty) return code;
+      }
+    }
     final primary = (item['primarySupplierCode'] as String?)?.trim();
     if (primary?.isNotEmpty == true) return primary;
     final secondary = (item['secondarySupplierCode'] as String?)?.trim();
     return secondary?.isNotEmpty == true ? secondary : null;
+  }
+
+  String _supplierNameForCode(String code) {
+    for (final supplier in _suppliers) {
+      if ((supplier['code'] as String? ?? '').trim() == code) {
+        return (supplier['name'] as String? ?? code).trim();
+      }
+    }
+    return _t('未知供应商', 'Unknown Supplier');
   }
 
   bool _hasSupplierSmsRecipient(Iterable<Map<String, dynamic>> items) {
@@ -291,6 +307,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
               : raw['orderToday'] is bool
               ? raw['orderToday']
               : _toInt(raw['orderQuantity']) > 0,
+          'supplierCodes': raw['supplierCodes'],
           'primarySupplierCode': raw['primarySupplierCode'],
           'primarySupplierName': raw['primarySupplierName'],
           'secondarySupplierCode': raw['secondarySupplierCode'],
@@ -314,6 +331,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
           'minQuantity': minQuantity,
           'orderQuantity': suggestedQuantity,
           'categorySelected': false,
+          'supplierCodes': raw['supplierCodes'],
           'primarySupplierCode': raw['primarySupplierCode'],
           'primarySupplierName': raw['primarySupplierName'],
           'secondarySupplierCode': raw['secondarySupplierCode'],
@@ -694,6 +712,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'minQuantity': item['minQuantity'],
                                 'orderQuantity': item['orderQuantity'],
                                 'categorySelected': item['categorySelected'],
+                                'supplierCodes': item['supplierCodes'],
                                 'primarySupplierCode':
                                     item['primarySupplierCode'],
                                 'primarySupplierName':
@@ -821,6 +840,7 @@ class _StockOrderPageState extends State<StockOrderPage> {
                                 'minQuantity': item['minQuantity'],
                                 'orderQuantity': item['orderQuantity'],
                                 'categorySelected': item['categorySelected'],
+                                'supplierCodes': item['supplierCodes'],
                                 'primarySupplierCode':
                                     item['primarySupplierCode'],
                                 'primarySupplierName':
@@ -931,20 +951,13 @@ class _StockOrderPageState extends State<StockOrderPage> {
     final Map<String, Map<String, dynamic>> supplierGroups = {};
 
     for (final item in selectedItems) {
-      final supplierCode =
-          (item['primarySupplierCode'] as String?)?.trim().isNotEmpty == true
-          ? _normalizedSupplierCode(item['primarySupplierCode'])
-          : ((item['secondarySupplierCode'] as String?)?.trim().isNotEmpty ==
-                    true
-                ? _normalizedSupplierCode(item['secondarySupplierCode'])
-                : 'UNKNOWN');
-      final supplierName =
-          (item['primarySupplierName'] as String?)?.trim().isNotEmpty == true
-          ? item['primarySupplierName'] as String
-          : ((item['secondarySupplierName'] as String?)?.trim().isNotEmpty ==
-                    true
-                ? item['secondarySupplierName'] as String
-                : _t('未知供应商', 'Unknown Supplier'));
+      final selectedSupplier = _supplierCodeForItem(item);
+      final supplierCode = selectedSupplier == null
+          ? 'UNKNOWN'
+          : _normalizedSupplierCode(selectedSupplier);
+      final supplierName = supplierCode == 'UNKNOWN'
+          ? _t('未知供应商', 'Unknown Supplier')
+          : _supplierNameForCode(supplierCode);
 
       final group = supplierGroups.putIfAbsent(supplierCode, () {
         return {
