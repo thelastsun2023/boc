@@ -15,5 +15,7 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           npm install -g @railway/cli
-          railway link ${{ secrets.RAILWAY_PROJECT_ID }}
-          railway up
+          railway up --ci \
+            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
+            --service c9946ac4-1fc2-49a9-b33d-aae64a846b0e \
+            --environment 3313c6ec-59c9-4833-bb5d-0fbb5843af0a
