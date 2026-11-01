@@ -4,11 +4,13 @@ import 'dart:typed_data';
 
 import 'package:crop_your_image/crop_your_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../services/session_service.dart';
 import '../services/system_service.dart';
+import '../services/api_base_url.dart';
 
 class SystemManagementPage extends StatefulWidget {
   final int initialTabIndex;
@@ -3259,6 +3261,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                               if (alert)
                                 const Icon(Icons.warning_amber, color: Colors.red),
                               IconButton(
+                                onPressed: () => _showTemperatureQrCode(item),
+                                icon: const Icon(Icons.qr_code_2),
+                                tooltip: '生成二维码',
+                              ),
+                              IconButton(
                                 onPressed: () =>
                                     _showTemperatureDeviceDialog(item: item),
                                 icon: const Icon(Icons.edit_outlined),
@@ -3279,6 +3286,70 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                       );
                     },
                   ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showTemperatureQrCode(Map<String, dynamic> item) async {
+    final publicUrl = Uri.parse(getBaseUrl())
+        .resolve('/temperature-entry/${item['id']}')
+        .toString();
+    final qrUrl = Uri.https(
+      'api.qrserver.com',
+      '/v1/create-qr-code/',
+      {'size': '360x360', 'data': publicUrl},
+    ).toString();
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${item['name']} · 温度录入二维码'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 360,
+                height: 360,
+                padding: const EdgeInsets.all(10),
+                color: Colors.white,
+                child: Image.network(
+                  qrUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const Center(
+                    child: Text('二维码加载失败，请检查网络后重试'),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('扫码后无需登录，可直接填写设备温度。'),
+              const SizedBox(height: 8),
+              SelectableText(
+                publicUrl,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: publicUrl));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('链接已复制')),
+                );
+              }
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('复制链接'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
           ),
         ],
       ),

@@ -920,9 +920,11 @@ final _router = Router()
   ..put('/api/temperature-devices/<id>', _updateTemperatureDevice)
   ..delete('/api/temperature-devices/<id>', _deleteTemperatureDevice)
   ..post('/api/temperature-records', _addTemperatureRecord)
+  ..post('/api/public/temperature-records', _addPublicTemperatureRecord)
   ..get('/api/temperature-records', _getTemperatureRecords)
   ..delete('/api/temperature-records/<id>', _deleteTemperatureRecord)
   ..post('/api/temperature-records/ensure', _ensureTemperatureRecordsOnOpen)
+  ..get('/temperature-entry/<id>', _publicTemperatureEntryPage)
   // Semi Products
   ..post('/api/semi-products', _addSemiProduct)
   ..get('/api/semi-products', _getSemiProducts)
@@ -5662,6 +5664,160 @@ Future<Response> _deleteTemperatureDevice(Request request, String id) async {
   }
 }
 
+Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
+  final deviceId = int.tryParse(id);
+  if (deviceId == null) {
+    return Response.notFound('Temperature device not found');
+  }
+  final result = await _conn.execute(
+    '''SELECT name, location, lower_limit, upper_limit
+       FROM temperature_devices WHERE id = \$1''',
+    parameters: [deviceId],
+  );
+  if (result.isEmpty) {
+    return Response.notFound(
+      '<h1>设备不存在 / Device not found</h1>',
+      headers: {'Content-Type': 'text/html; charset=utf-8'},
+    );
+  }
+  const escape = HtmlEscape(HtmlEscapeMode.element);
+  final name = escape.convert(result.first[0]?.toString() ?? '');
+  final location = escape.convert(result.first[1]?.toString() ?? '');
+  final lower = double.parse(result.first[2].toString());
+  final upper = double.parse(result.first[3].toString());
+  final html = '''<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>温度记录 / Temperature Entry</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif}
+    .wrap{max-width:620px;margin:0 auto;padding:20px}.card{background:white;border-radius:18px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.1)}
+    h1{margin:0 0 20px;font-size:25px}.info{display:grid;grid-template-columns:1fr;gap:10px;background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:20px}
+    .label{font-size:13px;color:#64748b}.value{font-size:17px;font-weight:650}.field{margin-top:18px}label{display:block;font-weight:650;margin-bottom:7px}
+    input,textarea{width:100%;font-size:20px;border:2px solid #cbd5e1;border-radius:12px;padding:13px;background:white;outline:none}textarea{font-size:16px;min-height:100px;resize:vertical}
+    input:focus,textarea:focus{border-color:#2563eb}.status{display:none;margin-top:12px;padding:13px;border-radius:10px;font-weight:700}.ok{display:block;background:#dcfce7;color:#166534}.bad{display:block;background:#fee2e2;color:#991b1b}
+    .hidden{display:none}.required{color:#dc2626}button{width:100%;margin-top:20px;border:0;border-radius:12px;padding:14px;background:#2563eb;color:white;font-size:17px;font-weight:700;cursor:pointer}button:disabled{opacity:.55}
+    .message{margin-top:14px;text-align:center;font-weight:650}.success{color:#15803d}.error{color:#b91c1c}
+  </style>
+</head>
+<body><main class="wrap"><section class="card">
+  <h1>设备温度记录<br><small>Device Temperature Entry</small></h1>
+  <div class="info">
+    <div><div class="label">设备名称 / Device name</div><div class="value">$name</div></div>
+    <div><div class="label">设备位置 / Location</div><div class="value">$location</div></div>
+    <div><div class="label">扫码时间 / Scan time</div><div class="value" id="scanTime"></div></div>
+    <div><div class="label">温度上下限 / Temperature limits</div><div class="value">${lower.toStringAsFixed(1)} °C ～ ${upper.toStringAsFixed(1)} °C</div></div>
+  </div>
+  <form id="entryForm" novalidate>
+    <div class="field"><label for="temperature">当前温度 / Current temperature (°C)</label>
+      <input id="temperature" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 / Example: 2.5 or -19.2" required>
+      <div id="status" class="status"></div>
+    </div>
+    <div id="noteField" class="field hidden"><label for="note">备注（整改措施）/ Corrective action <span class="required">*</span></label>
+      <textarea id="note" placeholder="请填写整改措施 / Corrective action is required"></textarea>
+    </div>
+    <button id="submitButton" type="submit">提交温度 / Submit Temperature</button>
+    <div id="message" class="message"></div>
+  </form>
+</section></main>
+<script>
+  const deviceId=$deviceId, lower=$lower, upper=$upper;
+  const input=document.getElementById('temperature'), statusBox=document.getElementById('status');
+  const noteField=document.getElementById('noteField'), note=document.getElementById('note');
+  document.getElementById('scanTime').textContent=new Intl.DateTimeFormat('zh-CN',{dateStyle:'medium',timeStyle:'medium'}).format(new Date());
+  function sanitize(value){
+    let clean=value.replace(/[^0-9.\\-]/g,'');
+    clean=clean.replace(/(?!^)-/g,'');
+    const firstDot=clean.indexOf('.');
+    if(firstDot>=0) clean=clean.slice(0,firstDot+1)+clean.slice(firstDot+1).replace(/\\./g,'');
+    return clean;
+  }
+  function updateState(){
+    input.value=sanitize(input.value);
+    if(!/^-?(?:\\d+\\.?\\d*|\\.\\d+)\$/.test(input.value)){statusBox.className='status';noteField.className='field hidden';return null;}
+    const value=Number(input.value), outside=value<lower||value>upper;
+    statusBox.textContent=outside?'温度超出范围 / Out of range':'温度正常 / Within range';
+    statusBox.className='status '+(outside?'bad':'ok');
+    noteField.className=outside?'field':'field hidden';
+    note.required=outside;
+    return {value:value,outside:outside};
+  }
+  input.addEventListener('input',updateState);
+  document.getElementById('entryForm').addEventListener('submit',async function(event){
+    event.preventDefault();const state=updateState(),message=document.getElementById('message'),button=document.getElementById('submitButton');
+    if(!state){message.className='message error';message.textContent='请输入正确的数字 / Enter a valid number';return;}
+    if(state.outside&&!note.value.trim()){message.className='message error';message.textContent='超限时必须填写整改措施 / Corrective action is required';note.focus();return;}
+    button.disabled=true;message.textContent='';
+    try{
+      const response=await fetch('/api/public/temperature-records',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceId:deviceId,temperature:state.value,note:note.value.trim()})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||'Submit failed');
+      message.className='message success';message.textContent='提交成功 / Submitted successfully';input.value='';note.value='';statusBox.className='status';noteField.className='field hidden';
+    }catch(error){message.className='message error';message.textContent='提交失败 / Failed: '+error.message;}finally{button.disabled=false;}
+  });
+</script></body></html>''';
+  return Response.ok(
+    html,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  );
+}
+
+Future<Response> _addPublicTemperatureRecord(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final deviceId = (json['deviceId'] as num?)?.toInt();
+    final temperature = (json['temperature'] as num?)?.toDouble();
+    final note = _normalizedOptionalString(json['note']);
+    if (deviceId == null || temperature == null || !temperature.isFinite) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid device or temperature'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final device = await _conn.execute(
+      'SELECT lower_limit, upper_limit FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (device.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final lower = double.parse(device.first[0].toString());
+    final upper = double.parse(device.first[1].toString());
+    final outside = temperature < lower || temperature > upper;
+    if (outside && note == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Corrective action is required'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''INSERT INTO temperature_records (device_id, temperature, recorded_at, note)
+         VALUES (\$1, \$2, \$3, \$4) RETURNING id''',
+      parameters: [deviceId, temperature, _albertaNow(), note],
+    );
+    return Response.ok(
+      jsonEncode({
+        'success': true,
+        'id': result.first[0],
+        'outOfRange': outside,
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
 Future<Response> _addTemperatureRecord(Request request) async {
   try {
     final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
@@ -6679,7 +6835,9 @@ void main() async {
     final webHandler = _createWebHandler();
     FutureOr<Response> handler(Request request) {
       final path = request.url.path;
-      if (path.startsWith('api/') || path.startsWith('uploads/')) {
+      if (path.startsWith('api/') ||
+          path.startsWith('uploads/') ||
+          path.startsWith('temperature-entry/')) {
         return apiHandler(request);
       }
       return webHandler(request);
