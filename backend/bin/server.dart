@@ -5175,17 +5175,11 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
     final results = <Map<String, dynamic>>[];
     for (final entry in supplierGroups.entries) {
       final supplier = await _conn.execute(
-        'SELECT name, phone FROM suppliers WHERE code = \$1 LIMIT 1',
+        'SELECT phone FROM suppliers WHERE code = \$1 LIMIT 1',
         parameters: [entry.key],
       );
-      final supplierName = supplier.isNotEmpty
-          ? (supplier.first[0] as String? ?? entry.key)
-          : ((entry.value.first['primarySupplierName'] ??
-                  entry.value.first['secondarySupplierName'] ??
-                  entry.key)
-              .toString());
       final supplierPhone = supplier.isNotEmpty
-          ? _normalizedOptionalString(supplier.first[1])
+          ? _normalizedOptionalString(supplier.first[0])
           : null;
 
       if (sendSupplierSms && supplierPhone != null) {

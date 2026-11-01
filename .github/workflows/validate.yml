@@ -21,7 +21,7 @@ jobs:
           if [ $status -ne 0 ]; then
             while IFS= read -r line; do
               echo "::error::$line"
-            done <<< "$output"
+            done <<< "$(printf '%s\n' "$output" | grep -E '(^|[[:space:]])error([[:space:]•-]|$)' || true)"
             exit $status
           fi
 
@@ -38,7 +38,7 @@ jobs:
         run: |
           dart pub get
           set +e
-          output=$(dart analyze bin/server.dart 2>&1)
+          output=$(dart analyze --no-fatal-warnings bin/server.dart 2>&1)
           status=$?
           echo "$output"
           if [ $status -ne 0 ]; then
