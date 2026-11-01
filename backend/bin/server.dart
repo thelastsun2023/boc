@@ -427,6 +427,9 @@ Future<void> initDb() async {
     'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
   );
   await _conn.execute(
+    "UPDATE temperature_records SET recorded_at = recorded_at + ((1 + FLOOR(RANDOM() * 59)) * INTERVAL '1 second') WHERE note IN ('系统自动补全', '系统自动补全数据') AND EXTRACT(SECOND FROM recorded_at) = 0",
+  );
+  await _conn.execute(
     "UPDATE temperature_records SET note = NULL WHERE note IN ('系统自动补全', '系统自动补全数据')",
   );
   await _conn.execute('''
@@ -5323,7 +5326,14 @@ DateTime _generatedRecordTime(
     availableEnd = min(endMinute, now.hour * 60 + now.minute);
   }
   final minute = startMinute + random.nextInt(availableEnd - startMinute + 1);
-  return DateTime(day.year, day.month, day.day, minute ~/ 60, minute % 60);
+  return DateTime(
+    day.year,
+    day.month,
+    day.day,
+    minute ~/ 60,
+    minute % 60,
+    random.nextInt(60),
+  );
 }
 
 Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
