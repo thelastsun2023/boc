@@ -2678,21 +2678,6 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         item['nameCN'] as String?,
                         item['nameEN'] as String?,
                       );
-                      final rankedSupplierCodes = <String>[
-                        for (final value in item['supplierCodes'] as List? ?? [])
-                          if (value?.toString().trim().isNotEmpty == true)
-                            value.toString().trim(),
-                      ];
-                      final rankedSupplierNames = [
-                        for (var i = 0; i < rankedSupplierCodes.length; i++)
-                          '${i + 1}. ${_suppliers.firstWhere(
-                            (supplier) =>
-                                supplier['code'] == rankedSupplierCodes[i],
-                            orElse: () => {
-                              'name': rankedSupplierCodes[i],
-                            },
-                          )['name']}',
-                      ].join('  ');
                       return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
@@ -2989,6 +2974,21 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         item['nameCN'] as String?,
                         item['nameEN'] as String?,
                       );
+                      final rankedSupplierCodes = <String>[
+                        for (final value in item['supplierCodes'] as List? ?? [])
+                          if (value?.toString().trim().isNotEmpty == true)
+                            value.toString().trim(),
+                      ];
+                      final rankedSupplierNames = [
+                        for (var i = 0; i < rankedSupplierCodes.length; i++)
+                          '${i + 1}. ${_suppliers.firstWhere(
+                            (supplier) =>
+                                supplier['code'] == rankedSupplierCodes[i],
+                            orElse: () => {
+                              'name': rankedSupplierCodes[i],
+                            },
+                          )['name']}',
+                      ].join('  ');
                       return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
