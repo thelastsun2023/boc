@@ -5385,8 +5385,11 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
       final dayKey = _temperatureDayKey(day);
       final isToday = day == today;
       final nowMinute = now.hour * 60 + now.minute;
-      final morningAvailable = !isToday || nowMinute >= 11 * 60 + 45;
-      final eveningAvailable = !isToday || nowMinute >= 20 * 60;
+      // Do not synthesize a reading while its collection window is still
+      // pending. The morning slot is checked after 15:00 and the evening slot
+      // after 21:00; a later visit also backfills missed prior-day slots.
+      final morningAvailable = !isToday || nowMinute >= 15 * 60;
+      final eveningAvailable = !isToday || nowMinute >= 21 * 60;
       if (morningAvailable && !slots.contains('$dayKey-morning')) {
         pending.add((
           deviceId: deviceId,
