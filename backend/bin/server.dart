@@ -275,6 +275,17 @@ Future<void> initDb() async {
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS image_path VARCHAR(255)',
   );
   await _conn.execute(
+    'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS image_paths TEXT[]',
+  );
+  await _conn.execute('''
+    UPDATE raw_materials
+    SET image_paths = CASE
+      WHEN image_path IS NULL OR TRIM(image_path) = '' THEN ARRAY[]::text[]
+      ELSE ARRAY[image_path::text]
+    END
+    WHERE image_paths IS NULL
+  ''');
+  await _conn.execute(
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS primary_supplier_code VARCHAR(50)',
   );
   await _conn.execute(
@@ -1752,6 +1763,17 @@ List<String> _rawMaterialSupplierCodes(Map<String, dynamic> json) {
   return result;
 }
 
+List<String> _rawMaterialImagePaths(Map<String, dynamic> json) {
+  final values = json['imagePaths'];
+  final candidates = values is List ? values : [json['imagePath']];
+  final result = <String>[];
+  for (final value in candidates) {
+    final path = _normalizedOptionalString(value);
+    if (path != null && !result.contains(path)) result.add(path);
+  }
+  return result;
+}
+
 Future<bool> _rawMaterialSuppliersExist(List<String> codes) async {
   if (codes.isEmpty) return true;
   final result = await _conn.execute(
@@ -1772,7 +1794,8 @@ Future<Response> _addRawMaterial(Request request) async {
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
-    final imagePath = _normalizedOptionalString(json['imagePath']);
+    final imagePaths = _rawMaterialImagePaths(json);
+    final imagePath = imagePaths.isEmpty ? null : imagePaths.first;
     final supplierCodes = _rawMaterialSupplierCodes(json);
     if (!await _rawMaterialSuppliersExist(supplierCodes)) {
       return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
@@ -1804,13 +1827,14 @@ Future<Response> _addRawMaterial(Request request) async {
         name_en,
         specification,
         image_path,
+        image_paths,
         primary_supplier_code,
         secondary_supplier_code,
         supplier_codes,
         category_code,
         location_code,
         min_quantity
-      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11)
+      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12)
       ''',
       parameters: [
         finalCode,
@@ -1818,6 +1842,7 @@ Future<Response> _addRawMaterial(Request request) async {
         nameEN,
         specification,
         imagePath,
+        imagePaths,
         primarySupplierCode,
         secondarySupplierCode,
         supplierCodes,
@@ -1882,6 +1907,13 @@ Future<Response> _getRawMaterials(Request request) async {
             ARRAY[rm.primary_supplier_code::text, rm.secondary_supplier_code::text],
             NULL
           )
+        ),
+        COALESCE(
+          rm.image_paths,
+          CASE
+            WHEN rm.image_path IS NULL OR TRIM(rm.image_path) = '' THEN ARRAY[]::text[]
+            ELSE ARRAY[rm.image_path::text]
+          END
         )
       FROM raw_materials rm
       LEFT JOIN suppliers ps ON ps.code = rm.primary_supplier_code
@@ -1916,6 +1948,11 @@ Future<Response> _getRawMaterials(Request request) async {
               'notesRich': row[15],
               'hiddenStoreCodes': row[16],
               'supplierCodes': row[17],
+              'imagePaths': row[18],
+              'imageUrls': (row[18] as List)
+                  .map((path) => _imageUrlFromPath(path?.toString()))
+                  .whereType<String>()
+                  .toList(),
             })
         .toList();
 
@@ -2095,8 +2132,10 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
-    final hasImagePath = json.containsKey('imagePath');
-    final imagePath = _normalizedOptionalString(json['imagePath']);
+    final hasImagePaths =
+        json.containsKey('imagePaths') || json.containsKey('imagePath');
+    final imagePaths = _rawMaterialImagePaths(json);
+    final imagePath = imagePaths.isEmpty ? null : imagePaths.first;
     final supplierCodes = _rawMaterialSupplierCodes(json);
     if (!await _rawMaterialSuppliersExist(supplierCodes)) {
       return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
@@ -2117,10 +2156,10 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
       );
     }
 
-    String? finalImagePath;
-    if (hasImagePath) {
+    final oldImagePaths = <String>[];
+    if (hasImagePaths) {
       final existing = await _conn.execute(
-        'SELECT image_path FROM raw_materials WHERE code = \$1',
+        'SELECT image_path, image_paths FROM raw_materials WHERE code = \$1',
         parameters: [code],
       );
       if (existing.isEmpty) {
@@ -2133,15 +2172,19 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
         );
       }
 
-      final oldImagePath = existing.first[0] as String?;
-      finalImagePath = imagePath;
-      if (oldImagePath != null && oldImagePath != finalImagePath) {
-        await _deleteUploadedImage(oldImagePath);
+      final savedPaths = existing.first[1];
+      if (savedPaths is List) {
+        oldImagePaths.addAll(
+          savedPaths.map((path) => path.toString()).where((path) => path.isNotEmpty),
+        );
+      } else {
+        final oldImagePath = existing.first[0] as String?;
+        if (oldImagePath?.isNotEmpty == true) oldImagePaths.add(oldImagePath!);
       }
     }
 
     final result = await _conn.execute(
-      hasImagePath
+      hasImagePaths
           ? '''
             UPDATE raw_materials
             SET
@@ -2149,13 +2192,14 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               name_en = \$2,
               specification = \$3,
               image_path = \$4,
-              primary_supplier_code = \$5,
-              secondary_supplier_code = \$6,
-              supplier_codes = \$7,
-              category_code = \$8,
-              location_code = \$9,
-              min_quantity = \$10
-            WHERE code = \$11
+              image_paths = \$5,
+              primary_supplier_code = \$6,
+              secondary_supplier_code = \$7,
+              supplier_codes = \$8,
+              category_code = \$9,
+              location_code = \$10,
+              min_quantity = \$11
+            WHERE code = \$12
             '''
           : '''
             UPDATE raw_materials
@@ -2171,12 +2215,13 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               min_quantity = \$9
             WHERE code = \$10
             ''',
-      parameters: hasImagePath
+      parameters: hasImagePaths
           ? [
               nameCN.trim(),
               nameEN,
               specification,
-              finalImagePath,
+              imagePath,
+              imagePaths,
               primarySupplierCode,
               secondarySupplierCode,
               supplierCodes,
@@ -2209,6 +2254,10 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
       );
     }
 
+    for (final oldPath in oldImagePaths) {
+      if (!imagePaths.contains(oldPath)) await _deleteUploadedImage(oldPath);
+    }
+
     await _saveMaterialSettings(code, settings);
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Raw material updated'}),
@@ -2233,11 +2282,19 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
 Future<Response> _deleteRawMaterial(Request request, String code) async {
   try {
     final existing = await _conn.execute(
-      'SELECT image_path FROM raw_materials WHERE code = \$1',
+      'SELECT image_path, image_paths FROM raw_materials WHERE code = \$1',
       parameters: [code],
     );
-    final oldImagePath =
-        existing.isNotEmpty ? existing.first[0] as String? : null;
+    final oldImagePaths = <String>[];
+    if (existing.isNotEmpty && existing.first[1] is List) {
+      oldImagePaths.addAll(
+        (existing.first[1] as List)
+            .map((path) => path.toString())
+            .where((path) => path.isNotEmpty),
+      );
+    } else if (existing.isNotEmpty && existing.first[0] != null) {
+      oldImagePaths.add(existing.first[0].toString());
+    }
 
     final result = await _conn.execute(
       'DELETE FROM raw_materials WHERE code = \$1',
@@ -2254,7 +2311,9 @@ Future<Response> _deleteRawMaterial(Request request, String code) async {
       );
     }
 
-    await _deleteUploadedImage(oldImagePath);
+    for (final imagePath in oldImagePaths) {
+      await _deleteUploadedImage(imagePath);
+    }
 
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Raw material deleted'}),

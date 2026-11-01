@@ -21,12 +21,10 @@ class SystemService {
     String? locationCode,
     List<String> supplierCodes,
     double minQuantity,
-    Uint8List? imageBytes,
-    String? imageFileName, {
+    List<String> imagePaths, {
     String? notesRich,
     List<String>? visibleStoreCodes,
   }) async {
-    final imagePath = await _uploadImage(imageBytes, imageFileName);
     return _post('/api/raw-materials', {
       'nameCN': nameCN,
       'nameEN': nameEN,
@@ -37,7 +35,7 @@ class SystemService {
       'minQuantity': minQuantity,
       if (notesRich != null) 'notesRich': notesRich,
       if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
-      'imagePath': imagePath,
+      'imagePaths': imagePaths,
     }, 'Failed to add raw material');
   }
 
@@ -58,13 +56,11 @@ class SystemService {
     String? locationCode,
     List<String> supplierCodes,
     double minQuantity,
-    Uint8List? imageBytes,
-    String? imageFileName, {
+    List<String> imagePaths, {
     String? notesRich,
     List<String>? visibleStoreCodes,
   }) async {
     final encodedCode = Uri.encodeComponent(code);
-    final imagePath = await _uploadImage(imageBytes, imageFileName);
     final payload = <String, dynamic>{
       'nameCN': nameCN,
       'nameEN': nameEN,
@@ -72,13 +68,11 @@ class SystemService {
       'categoryCode': categoryCode,
       'locationCode': locationCode,
       'supplierCodes': supplierCodes,
+      'imagePaths': imagePaths,
       'minQuantity': minQuantity,
       if (notesRich != null) 'notesRich': notesRich,
       if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
     };
-    if (imagePath != null) {
-      payload['imagePath'] = imagePath;
-    }
     return _put(
       '/api/raw-materials/$encodedCode',
       payload,

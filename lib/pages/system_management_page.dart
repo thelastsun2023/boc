@@ -813,9 +813,15 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       }
       return code;
     }
-    Uint8List? imageBytes = item?['imageBytes'] as Uint8List?;
-    String? imageUrl = item?['imageUrl'] as String?;
-    String? imageFileName = item?['imagePath'] as String?;
+    final imagePaths = <String>[
+      for (final value in item?['imagePaths'] as List? ?? [])
+        if (value?.toString().trim().isNotEmpty == true)
+          value.toString().trim(),
+    ];
+    if (imagePaths.isEmpty && item?['imagePath'] != null) {
+      imagePaths.add(item!['imagePath'].toString());
+    }
+    final pendingImages = <({Uint8List bytes, String fileName})>[];
     String notesRich = item?['notesRich'] as String? ?? '[{"insert":"\\n"}]';
     final hidden = List<String>.from(item?['hiddenStoreCodes'] ?? []);
     final visibleStoreCodes = _stores
@@ -1057,66 +1063,87 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  FilledButton.icon(
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
                     onPressed: isSubmitting
                         ? null
                         : () async {
                             final picked = await _pickAndEditImage();
                             if (picked != null) {
                               setDialogState(() {
-                                imageBytes = picked.bytes;
-                                imageFileName = picked.fileName;
-                                imageUrl = null;
+                                pendingImages.add(picked);
                               });
                             }
                           },
                     icon: const Icon(Icons.image_outlined),
-                    label: Text(
-                      imageBytes != null || imageUrl != null ? '更换照片' : '上传照片',
+                    label: const Text('添加照片 / Add Photo'),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (imageBytes != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(
-                        imageBytes!,
-                        width: 180,
-                        height: 180,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  else if (imageUrl?.isNotEmpty == true)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        _displayImageUrl(imageUrl!),
-                        width: 180,
-                        height: 180,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const SizedBox(
-                              width: 180,
-                              height: 180,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Color(0x11000000),
-                                ),
-                                child: Icon(Icons.broken_image, size: 40),
-                              ),
-                            ),
-                      ),
+                  if (imagePaths.isEmpty && pendingImages.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('暂无照片 / No photos'),
                     )
                   else
-                    const SizedBox(
-                      width: 180,
-                      height: 180,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(color: Color(0x11000000)),
-                        child: Icon(
-                          Icons.image_not_supported_outlined,
-                          size: 40,
-                        ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (var index = 0; index < imagePaths.length; index++)
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ProductImage(
+                                  url: imagePaths[index],
+                                  title: nameCNController.text.trim(),
+                                  width: 86,
+                                  height: 86,
+                                ),
+                                Positioned(
+                                  right: -6,
+                                  top: -6,
+                                  child: IconButton.filled(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: '删除照片',
+                                    onPressed: () => setDialogState(
+                                      () => imagePaths.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          for (var index = 0;
+                              index < pendingImages.length;
+                              index++)
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ProductImage(
+                                  bytes: pendingImages[index].bytes,
+                                  title: nameCNController.text.trim(),
+                                  width: 86,
+                                  height: 86,
+                                ),
+                                Positioned(
+                                  right: -6,
+                                  top: -6,
+                                  child: IconButton.filled(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: '删除照片',
+                                    onPressed: () => setDialogState(
+                                      () => pendingImages.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -1189,6 +1216,14 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         isSubmitting = true;
                       });
                       try {
+                        final savedImagePaths = List<String>.from(imagePaths);
+                        for (final image in pendingImages) {
+                          final path = await _systemService.uploadImage(
+                            image.bytes,
+                            image.fileName,
+                          );
+                          if (path != null) savedImagePaths.add(path);
+                        }
                         final success = isEdit
                             ? await _systemService.updateRawMaterial(
                                 item['code'] as String,
@@ -1199,8 +1234,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 locationCode,
                                 List<String>.from(supplierCodes),
                                 minQuantity,
-                                imageBytes,
-                                imageFileName,
+                                savedImagePaths,
                                 notesRich: notesRich,
                                 visibleStoreCodes: visibleStoreCodes.toList(),
                               )
@@ -1212,8 +1246,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 locationCode,
                                 List<String>.from(supplierCodes),
                                 minQuantity,
-                                imageBytes,
-                                imageFileName,
+                                savedImagePaths,
                                 notesRich: notesRich,
                                 visibleStoreCodes: visibleStoreCodes.toList(),
                               );
@@ -2968,8 +3001,16 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     itemCount: filteredRawMaterials.length,
                     itemBuilder: (context, index) {
                       final item = filteredRawMaterials[index];
-                      final imageBytes = item['imageBytes'] as Uint8List?;
                       final imageUrl = item['imageUrl'] as String?;
+                      final materialImagePaths = <String>[
+                        for (final value in item['imagePaths'] as List? ?? [])
+                          if (value?.toString().trim().isNotEmpty == true)
+                            value.toString().trim(),
+                      ];
+                      if (materialImagePaths.isEmpty &&
+                          imageUrl?.isNotEmpty == true) {
+                        materialImagePaths.add(imageUrl!);
+                      }
                       final displayName = _orderedName(
                         item['nameCN'] as String?,
                         item['nameEN'] as String?,
@@ -2995,10 +3036,11 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              ProductImage(
-                                url: imageUrl,
-                                bytes: imageBytes,
+                              ProductImageGallery(
+                                paths: materialImagePaths,
                                 title: displayName,
+                                width: 154,
+                                imageSize: 64,
                               ),
                               const SizedBox(width: 12),
                               Expanded(

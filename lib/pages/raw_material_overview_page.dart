@@ -221,14 +221,22 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
       final spec = _displayString(item['specification']);
       final minQuantity = _displayString(item['minQuantity']);
       final suppliers = _supplierListText(item);
+      final imagePaths = <String>[
+        for (final value in item['imagePaths'] as List? ?? [])
+          if (value?.toString().trim().isNotEmpty == true)
+            value.toString().trim(),
+      ];
+      if (imagePaths.isEmpty && item['imageUrl'] != null) {
+        imagePaths.add(item['imageUrl'].toString());
+      }
       return DataRow(
         cells: [
           DataCell(
-            ProductImage(
-              url: item['imageUrl'] as String?,
+            ProductImageGallery(
+              paths: imagePaths,
               title: displayName,
-              width: 44,
-              height: 44,
+              width: 144,
+              imageSize: 44,
             ),
           ),
           DataCell(Text(code)),
