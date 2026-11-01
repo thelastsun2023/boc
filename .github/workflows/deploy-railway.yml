@@ -15,7 +15,16 @@ jobs:
           RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
         run: |
           npm install -g @railway/cli
-          railway up --ci \
+          set +e
+          output=$(railway up --ci \
             --project ${{ secrets.RAILWAY_PROJECT_ID }} \
             --service c9946ac4-1fc2-49a9-b33d-aae64a846b0e \
-            --environment 3313c6ec-59c9-4833-bb5d-0fbb5843af0a
+            --environment 3313c6ec-59c9-4833-bb5d-0fbb5843af0a 2>&1)
+          status=$?
+          echo "$output"
+          if [ $status -ne 0 ]; then
+            while IFS= read -r line; do
+              echo "::error::$line"
+            done <<< "$(printf '%s\n' "$output" | tail -n 10)"
+            exit $status
+          fi
