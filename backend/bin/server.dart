@@ -441,8 +441,8 @@ Future<void> initDb() async {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
-  // One-time production cleanup requested for this device. Keep the marker so
-  // the home-page backfill does not immediately recreate the cleared records.
+  // One-time production cleanups. These only delete readings; device settings,
+  // including active weekdays, remain unchanged and home-page backfill stays on.
   await _conn.execute('''
     WITH cleanup AS (
       INSERT INTO system_runtime_state (key, value, updated_at)
@@ -459,6 +459,18 @@ Future<void> initDb() async {
     WITH cleanup AS (
       INSERT INTO system_runtime_state (key, value, updated_at)
       VALUES ('temperature_records_cleared_seafood_display_cabinet_v1', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood insulated display cabinet'
+  ''');
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_display_cabinet_v2', 'true', CURRENT_TIMESTAMP)
       ON CONFLICT (key) DO NOTHING
       RETURNING key
     )
