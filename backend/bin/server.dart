@@ -426,6 +426,9 @@ Future<void> initDb() async {
   await _conn.execute(
     'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
   );
+  await _conn.execute(
+    "UPDATE temperature_records SET note = NULL WHERE note IN ('系统自动补全', '系统自动补全数据')",
+  );
   await _conn.execute('''
     CREATE TABLE IF NOT EXISTS system_runtime_state (
       key VARCHAR(100) PRIMARY KEY,
@@ -5433,7 +5436,7 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
         record.deviceId,
         record.value,
         record.at,
-        '系统自动补全',
+        null,
       ]);
     }
     await _conn.execute(
