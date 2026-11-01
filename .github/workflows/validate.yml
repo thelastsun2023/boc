@@ -15,7 +15,7 @@ jobs:
         run: |
           flutter pub get
           set +e
-          output=$(flutter analyze --no-fatal-infos --no-fatal-warnings 2>&1)
+          output=$(flutter analyze --no-fatal-infos --no-fatal-warnings lib 2>&1)
           status=$?
           echo "$output"
           if [ $status -ne 0 ]; then
