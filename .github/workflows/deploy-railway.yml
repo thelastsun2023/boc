@@ -17,7 +17,7 @@ jobs:
           npm install -g @railway/cli
           set +e
           output=$(railway up --ci \
-            --project ${{ secrets.RAILWAY_PROJECT_ID }} \
+            --project 0dc54340-8fff-49fe-9c1a-dc75f4b817e3 \
             --service c9946ac4-1fc2-49a9-b33d-aae64a846b0e \
             --environment 3313c6ec-59c9-4833-bb5d-0fbb5843af0a 2>&1)
           status=$?
