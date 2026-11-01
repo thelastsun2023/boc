@@ -116,12 +116,12 @@ class _TemperaturePageState extends State<TemperaturePage> {
         .summary-item { padding: 11px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: rgba(255,255,255,.1); }
         .summary-label { display: block; margin-bottom: 5px; font-size: 10px; opacity: .72; text-transform: uppercase; }
         .summary-value { font-size: 13px; font-weight: 700; }
-        .day-section { margin-top: 16px; padding: 18px; border: 1px solid #d7e5df; border-radius: 16px; background: white; break-inside: avoid; box-shadow: 0 5px 16px rgba(25,50,45,.06); }
-        .day-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+        .day-section { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 14px; margin-top: 12px; padding: 14px; border: 1px solid #d7e5df; border-radius: 14px; background: white; break-inside: avoid; box-shadow: 0 5px 16px rgba(25,50,45,.06); }
+        .day-heading { display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 5px; }
         .day-heading h2 { margin: 0; color: #184f47; font-size: 18px; }
         .day-heading span { color: #6b817b; font-size: 12px; }
         .reading-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
-        .reading { min-height: 112px; padding: 14px 16px; border: 1px solid; border-radius: 13px; break-inside: avoid; }
+        .reading { min-height: 82px; padding: 10px 12px; border: 1px solid; border-radius: 11px; break-inside: avoid; }
         .reading.normal { border-color: #a7d8c5; background: #effaf5; }
         .reading.alert { border-color: #f3aaa5; background: #fff3f2; }
         .reading-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -129,17 +129,34 @@ class _TemperaturePageState extends State<TemperaturePage> {
         .status { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; }
         .normal .status { color: #08734f; background: #d5f3e5; }
         .alert .status { color: #b42318; background: #ffdeda; }
-        .temperature { margin-top: 8px; color: #123c35; font-size: 29px; font-weight: 800; line-height: 1; }
+        .temperature { margin-top: 6px; color: #123c35; font-size: 25px; font-weight: 800; line-height: 1; }
         .alert .temperature { color: #b42318; }
         .temperature span { margin-left: 3px; font-size: 15px; font-weight: 700; }
         .note { margin-top: 10px; padding-top: 9px; border-top: 1px dashed #e3aaa5; color: #75302a; font-size: 11px; line-height: 1.45; }
         .report-footer { margin: 18px 4px 0; color: #71857f; font-size: 10px; text-align: right; }
-        @page { size: A4; margin: 12mm; }
+        @page { size: A4; margin: 7mm; }
         @media print {
           body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
           .temperature-report { width: 100%; margin: 0; }
-          .report-header { box-shadow: none; }
-          .day-section { box-shadow: none; }
+          .report-header { padding: 12px 14px; border-radius: 8px; box-shadow: none; }
+          .eyebrow { margin-bottom: 3px; font-size: 8px; }
+          h1 { margin-bottom: 7px; font-size: 18px; }
+          .summary { gap: 5px; }
+          .summary-item { padding: 5px 7px; border-radius: 5px; }
+          .summary-label { margin-bottom: 2px; font-size: 7px; }
+          .summary-value { font-size: 9px; }
+          .day-section { grid-template-columns: 103px minmax(0, 1fr); gap: 6px; margin-top: 4px; padding: 4px 6px; border-radius: 5px; box-shadow: none; }
+          .day-heading { gap: 2px; }
+          .day-heading h2 { font-size: 10px; }
+          .day-heading span { font-size: 7px; }
+          .reading-grid { gap: 4px; }
+          .reading { min-height: 38px; padding: 4px 6px; border-radius: 4px; }
+          .time { font-size: 8px; }
+          .status { padding: 2px 4px; font-size: 6px; }
+          .temperature { display: inline-block; margin-top: 3px; font-size: 14px; }
+          .temperature span { font-size: 8px; }
+          .note { margin-top: 3px; padding-top: 3px; font-size: 7px; line-height: 1.2; }
+          .report-footer { margin-top: 6px; font-size: 7px; }
         }
       </style>
       <main class="temperature-report">
