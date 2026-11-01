@@ -1071,6 +1071,8 @@ class SystemService {
       'Failed to ensure temperature records',
     );
   }
+  Future<Map<String, dynamic>> getTemperatureSchedule() => _get('/api/temperature-schedule', '读取安排失败');
+  Future<bool> saveTemperatureSchedule(Map<String, dynamic> data) => _post('/api/temperature-schedule', data, '保存安排失败');
 
   Future<Map<String, dynamic>> _get(String path, String message) async {
     try {

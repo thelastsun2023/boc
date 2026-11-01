@@ -3265,6 +3265,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 icon: const Icon(Icons.qr_code_2),
                                 tooltip: '生成二维码',
                               ),
+                              IconButton(onPressed: () => _temperatureWeekdays(item), icon: const Icon(Icons.date_range), tooltip: '是否按天 / Weekdays'),
                               IconButton(
                                 onPressed: () =>
                                     _showTemperatureDeviceDialog(item: item),
@@ -3354,6 +3355,22 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         ],
       ),
     );
+  }
+
+  Future<void> _temperatureWeekdays(Map<String, dynamic> item) async {
+    final data = await _systemService.getTemperatureSchedule();
+    final config = (data['devices'] as List).firstWhere((d) => d['id'] == item['id']);
+    var enabled = config['days'] != null;
+    final days = Set<int>.from(config['days'] ?? [1,2,3,4,5,6,7]);
+    if (!mounted) return;
+    final save = await showDialog<bool>(context: context, builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+      title: Text('${item['name']} · 自动生成日期'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        CheckboxListTile(title: const Text('是否按天 / Selected weekdays'), value: enabled, onChanged: (v) => update(() => enabled = v!)),
+        if (enabled) for (var i=1;i<=7;i++) CheckboxListTile(title: Text(['周一','周二','周三','周四','周五','周六','周日'][i-1]), value: days.contains(i), onChanged: (v) => update(() { if(v!) {days.add(i);} else {days.remove(i);} })),
+      ]), actions: [TextButton(onPressed: () => Navigator.pop(context,false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context,true), child: const Text('保存'))],
+    )));
+    if(save == true) await _systemService.saveTemperatureSchedule({'deviceId': item['id'], 'days': enabled ? days.toList() : null});
   }
 
   Widget _buildReminderTab() {

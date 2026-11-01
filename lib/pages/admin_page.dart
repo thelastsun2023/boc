@@ -16,6 +16,7 @@ import 'user_management_page.dart';
 import 'mall_page.dart';
 import 'procurement_page.dart';
 import 'temperature_page.dart';
+import 'temperature_rest_page.dart';
 import '../services/system_service.dart';
 
 class AdminPage extends StatefulWidget {
@@ -151,7 +152,7 @@ class _AdminPageState extends State<AdminPage> {
       'index': 11,
       'icon': Icons.device_thermostat,
       'label': _t('温度记录', 'Temperature Records'),
-      'page': const TemperaturePage(),
+      'page': (_sectionTabs[11] ?? 0) == 1 ? const TemperatureRestPage() : const TemperaturePage(),
     },
   ];
 
@@ -192,7 +193,7 @@ class _AdminPageState extends State<AdminPage> {
     8 => [_t('用户列表', 'Users'), _t('新增用户', 'Add User')],
     9 => [_t('商品列表', 'Product List'), _t('历史订单', 'Order History')],
     10 => [_t('采购详情', 'Purchase Details')],
-    11 => [_t('设备温度', 'Device Temperatures')],
+    11 => [_t('设备温度', 'Device Temperatures'), _t('休息日', 'Rest Days')],
     _ => const [],
   };
 

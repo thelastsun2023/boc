@@ -426,6 +426,8 @@ Future<void> initDb() async {
   await _conn.execute(
     'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
   );
+  await _conn.execute('ALTER TABLE temperature_devices ADD COLUMN IF NOT EXISTS active_days INTEGER[]');
+  await _conn.execute('CREATE TABLE IF NOT EXISTS temperature_rest_days (day DATE PRIMARY KEY)');
   await _conn.execute(
     "UPDATE temperature_records SET recorded_at = recorded_at + ((1 + FLOOR(RANDOM() * 59)) * INTERVAL '1 second') WHERE note IN ('系统自动补全', '系统自动补全数据') AND EXTRACT(SECOND FROM recorded_at) = 0",
   );
@@ -924,6 +926,8 @@ final _router = Router()
   ..get('/api/temperature-records', _getTemperatureRecords)
   ..delete('/api/temperature-records/<id>', _deleteTemperatureRecord)
   ..post('/api/temperature-records/ensure', _ensureTemperatureRecordsOnOpen)
+  ..get('/api/temperature-schedule', _temperatureSchedule)
+  ..post('/api/temperature-schedule', _temperatureSchedule)
   ..get('/temperature-entry/<id>', _publicTemperatureEntryPage)
   // Semi Products
   ..post('/api/semi-products', _addSemiProduct)
@@ -5349,8 +5353,10 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
       ? null
       : DateTime.tryParse(previousResult.first[0]?.toString() ?? '');
   final devices = await _conn.execute(
-    'SELECT id, name, location, lower_limit, upper_limit FROM temperature_devices ORDER BY id',
+    'SELECT id, name, location, lower_limit, upper_limit, active_days FROM temperature_devices ORDER BY id',
   );
+  final restRows = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days");
+  final restDays = restRows.map((r) => r[0].toString()).toSet();
   final random = Random();
   final pending = <({int deviceId, double value, DateTime at})>[];
 
@@ -5398,6 +5404,9 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
         !day.isAfter(today);
         day = day.add(const Duration(days: 1))) {
       final dayKey = _temperatureDayKey(day);
+      if (restDays.contains(dayKey)) continue;
+      final activeDays = device[5] as List?;
+      if (activeDays != null && !activeDays.contains(day.weekday)) continue;
       final isToday = day == today;
       final nowMinute = now.hour * 60 + now.minute;
       // Do not synthesize a reading while its collection window is still
@@ -5491,6 +5500,28 @@ Future<Response> _ensureTemperatureRecordsOnOpen(Request request) async {
 }
 
 // Temperature device and record APIs
+Future<Response> _temperatureSchedule(Request request) async {
+  final scope = await _authenticatedScope(request);
+  if (scope == null || !scope.isAdmin) return Response.forbidden('Administrator required');
+  if (request.method == 'POST') {
+    final data = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    if (data.containsKey('deviceId')) {
+      final days = data['days'];
+      if (days != null && (days is! List || days.any((d) => d is! int || d < 1 || d > 7))) {
+        return Response.badRequest(body: 'Invalid weekdays');
+      }
+      await _conn.execute('UPDATE temperature_devices SET active_days = \$1 WHERE id = \$2', parameters: [days == null ? null : List<int>.from(days), data['deviceId']]);
+    } else {
+      final day = DateTime.tryParse(data['day']?.toString() ?? '');
+      if (day == null) return Response.badRequest(body: 'Invalid date');
+      await _conn.execute(data['remove'] == true ? 'DELETE FROM temperature_rest_days WHERE day = \$1' : 'INSERT INTO temperature_rest_days (day) VALUES (\$1) ON CONFLICT DO NOTHING', parameters: [day]);
+    }
+  }
+  final rests = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days ORDER BY day DESC");
+  final devices = await _conn.execute('SELECT id, active_days FROM temperature_devices');
+  return Response.ok(jsonEncode({'days': rests.map((r) => r[0]).toList(), 'devices': devices.map((r) => {'id': r[0], 'days': r[1]}).toList()}), headers: {'Content-Type': 'application/json'});
+}
+
 Future<Response> _addTemperatureDevice(Request request) async {
   try {
     final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
@@ -5671,7 +5702,7 @@ Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
     return Response.notFound('Temperature device not found');
   }
   final result = await _conn.execute(
-    '''SELECT name, location, lower_limit, upper_limit
+    '''SELECT name, location, lower_limit, upper_limit, image_path
        FROM temperature_devices WHERE id = \$1''',
     parameters: [deviceId],
   );
@@ -5686,6 +5717,8 @@ Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
   final location = escape.convert(result.first[1]?.toString() ?? '');
   final lower = double.parse(result.first[2].toString());
   final upper = double.parse(result.first[3].toString());
+  final photo = _imageUrlFromPath(result.first[4] as String?);
+  final photoHtml = photo == null ? '' : '<img src="${const HtmlEscape().convert(photo)}" alt="设备照片 / Device photo" style="width:100%;max-height:280px;object-fit:contain;border-radius:12px">';
   final html = '''<!doctype html>
 <html lang="zh-CN">
 <head>
@@ -5705,6 +5738,7 @@ Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
 </head>
 <body><main class="wrap"><section class="card">
   <h1>设备温度记录<br><small>Device Temperature Entry</small></h1>
+  $photoHtml
   <div class="info">
     <div><div class="label">设备名称 / Device name</div><div class="value">$name</div></div>
     <div><div class="label">设备位置 / Location</div><div class="value">$location</div></div>

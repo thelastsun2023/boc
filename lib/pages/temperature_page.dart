@@ -1,4 +1,6 @@
 import 'dart:math' as math;
+import 'dart:convert';
+import '../services/browser_print.dart';
 
 import 'package:flutter/material.dart';
 
@@ -279,13 +281,14 @@ class TemperatureDetailPage extends StatefulWidget {
 class _TemperatureDetailPageState extends State<TemperatureDetailPage> {
   final _service = SystemService();
   bool _month = false;
+  DateTime _selectedMonth = DateTime.now();
   bool _loading = true;
   List<Map<String, dynamic>> _records = [];
   String? _error;
 
   DateTime get _start {
     final now = DateTime.now();
-    if (_month) return DateTime(now.year, now.month, 1);
+    if (_month) return DateTime(_selectedMonth.year, _selectedMonth.month, 1);
     final day = DateTime(now.year, now.month, now.day);
     return day.subtract(Duration(days: day.weekday - DateTime.monday));
   }
@@ -330,7 +333,17 @@ class _TemperatureDetailPageState extends State<TemperatureDetailPage> {
     final lower = (widget.device['lowerLimit'] as num).toDouble();
     final upper = (widget.device['upperLimit'] as num).toDouble();
     return Scaffold(
-      appBar: AppBar(title: Text('${widget.device['name']} · 温度曲线')),
+      appBar: AppBar(title: Text('${widget.device['name']} · 温度曲线'), actions: [
+        TextButton(onPressed: () async {
+          final date = await showDatePicker(context: context, initialDate: _selectedMonth, firstDate: DateTime(2026,5), lastDate: DateTime.now(), helpText: '选择月份内任意日期');
+          if(date!=null) {setState(() {_selectedMonth=date;_month=true;}); await _load();}
+        }, child: const Text('选择月份')),
+        TextButton(onPressed: _loading ? null : () async {
+          const escape=HtmlEscape();
+          final rows=_records.map((r)=>'<tr><td>${escape.convert(r['recordedAt'].toString())}</td><td>${r['temperature']}</td><td>${escape.convert((r['note']??'').toString())}</td></tr>').join();
+          await printHtmlDocument(title:'温度记录',htmlContent:'<h1>${escape.convert(widget.device['name'].toString())}</h1><p>${_dateText(_start)} ~ ${_dateText(_end.subtract(const Duration(days:1)))}</p><table border="1" cellpadding="8"><tr><th>时间 / Time</th><th>温度 / °C</th><th>备注 / Corrective action</th></tr>$rows</table>');
+        }, child: const Text('导出 / PDF')),
+      ]),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: Column(
