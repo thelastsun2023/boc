@@ -441,6 +441,20 @@ Future<void> initDb() async {
       updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
   ''');
+  // One-time production cleanup requested for this device. Keep the marker so
+  // the home-page backfill does not immediately recreate the cleared records.
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_refrigerator_v1', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood refrigerator'
+  ''');
 
   // Create semi_products table
   await _conn.execute('''
@@ -5357,6 +5371,10 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
   );
   final restRows = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days");
   final restDays = restRows.map((r) => r[0].toString()).toSet();
+  final disabledAutofillRows = await _conn.execute(
+    "SELECT value FROM system_runtime_state WHERE key = 'temperature_records_cleared_seafood_refrigerator_v1'",
+  );
+  final seafoodAutofillDisabled = disabledAutofillRows.isNotEmpty;
   final random = Random();
   final pending = <({int deviceId, double value, DateTime at})>[];
 
@@ -5364,6 +5382,10 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
     final deviceId = device[0] as int;
     final name = device[1] as String? ?? '';
     final location = device[2] as String? ?? '';
+    if (seafoodAutofillDisabled &&
+        name.trim().toLowerCase() == 'seafood refrigerator') {
+      continue;
+    }
     final lower = double.parse(device[3].toString());
     final upper = double.parse(device[4].toString());
     final earliestResult = await _conn.execute(
