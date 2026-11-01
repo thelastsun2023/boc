@@ -5371,10 +5371,6 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
   );
   final restRows = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days");
   final restDays = restRows.map((r) => r[0].toString()).toSet();
-  final disabledAutofillRows = await _conn.execute(
-    "SELECT value FROM system_runtime_state WHERE key = 'temperature_records_cleared_seafood_refrigerator_v1'",
-  );
-  final seafoodAutofillDisabled = disabledAutofillRows.isNotEmpty;
   final random = Random();
   final pending = <({int deviceId, double value, DateTime at})>[];
 
@@ -5382,10 +5378,6 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
     final deviceId = device[0] as int;
     final name = device[1] as String? ?? '';
     final location = device[2] as String? ?? '';
-    if (seafoodAutofillDisabled &&
-        name.trim().toLowerCase() == 'seafood refrigerator') {
-      continue;
-    }
     final lower = double.parse(device[3].toString());
     final upper = double.parse(device[4].toString());
     final earliestResult = await _conn.execute(
