@@ -67,7 +67,15 @@ class _TemperaturePageState extends State<TemperaturePage> {
       grouped.putIfAbsent(dayKey, () => []).add(record);
     }
 
-    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    const weekdays = [
+      '周一 / Mon',
+      '周二 / Tue',
+      '周三 / Wed',
+      '周四 / Thu',
+      '周五 / Fri',
+      '周六 / Sat',
+      '周日 / Sun',
+    ];
     final sections = grouped.entries.map((entry) {
       final firstTime = DateTime.tryParse(entry.value.first['recordedAt'].toString());
       final weekday = firstTime == null ? '' : ' · ${weekdays[firstTime.weekday - 1]}';
