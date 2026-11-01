@@ -1064,6 +1064,14 @@ class SystemService {
     );
   }
 
+  Future<bool> ensureTemperatureRecordsOnHomeOpen() {
+    return _post(
+      '/api/temperature-records/ensure',
+      const {},
+      'Failed to ensure temperature records',
+    );
+  }
+
   Future<Map<String, dynamic>> _get(String path, String message) async {
     try {
       final response = await http.get(

@@ -426,6 +426,13 @@ Future<void> initDb() async {
   await _conn.execute(
     'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
   );
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS system_runtime_state (
+      key VARCHAR(100) PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
 
   // Create semi_products table
   await _conn.execute('''
@@ -909,6 +916,7 @@ final _router = Router()
   ..post('/api/temperature-records', _addTemperatureRecord)
   ..get('/api/temperature-records', _getTemperatureRecords)
   ..delete('/api/temperature-records/<id>', _deleteTemperatureRecord)
+  ..post('/api/temperature-records/ensure', _ensureTemperatureRecordsOnOpen)
   // Semi Products
   ..post('/api/semi-products', _addSemiProduct)
   ..get('/api/semi-products', _getSemiProducts)
@@ -5199,6 +5207,258 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
         'Access-Control-Allow-Origin': '*'
       },
     );
+  }
+}
+
+Future<Map<String, dynamic>>? _temperatureEnsureInFlight;
+
+DateTime _albertaNow() {
+  final utc = DateTime.now().toUtc();
+  final year = utc.year;
+  var marchSundays = 0;
+  late DateTime dstStart;
+  for (var day = 1; day <= 14; day++) {
+    final date = DateTime.utc(year, 3, day);
+    if (date.weekday == DateTime.sunday && ++marchSundays == 2) {
+      dstStart = DateTime.utc(year, 3, day, 9);
+      break;
+    }
+  }
+  late DateTime dstEnd;
+  for (var day = 1; day <= 7; day++) {
+    final date = DateTime.utc(year, 11, day);
+    if (date.weekday == DateTime.sunday) {
+      dstEnd = DateTime.utc(year, 11, day, 8);
+      break;
+    }
+  }
+  final isDaylight = !utc.isBefore(dstStart) && utc.isBefore(dstEnd);
+  return utc.subtract(Duration(hours: isDaylight ? 6 : 7));
+}
+
+DateTime _dateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+String _temperatureDayKey(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';
+
+bool _isMorningTemperatureTime(DateTime value) {
+  final minute = value.hour * 60 + value.minute;
+  return minute >= 11 * 60 + 45 && minute <= 12 * 60 + 15;
+}
+
+bool _isEveningTemperatureTime(DateTime value) {
+  final minute = value.hour * 60 + value.minute;
+  return minute >= 20 * 60 && minute <= 21 * 60;
+}
+
+double _generatedTemperature(
+  Random random,
+  String name,
+  String location,
+  double lower,
+  double upper,
+  bool morning,
+) {
+  final text = '$name $location'.toLowerCase();
+  final range = upper - lower;
+  final isDishwasher = text.contains('dish') || text.contains('洗碗');
+  final isCooling = text.contains('refriger') ||
+      text.contains('refrigertor') ||
+      text.contains('freezer') ||
+      text.contains('fridge') ||
+      text.contains('cool') ||
+      text.contains('冷') ||
+      text.contains('冰');
+  final isHeating = text.contains('insulated') ||
+      text.contains('warmer') ||
+      text.contains('heater') ||
+      text.contains('hot') ||
+      text.contains('热') ||
+      text.contains('保温');
+  double lowRatio;
+  double highRatio;
+  if (isDishwasher) {
+    lowRatio = morning ? .12 : .65;
+    highRatio = morning ? .38 : .90;
+  } else if (isCooling) {
+    lowRatio = morning ? .15 : .55;
+    highRatio = morning ? .42 : .84;
+  } else if (isHeating) {
+    lowRatio = .22;
+    highRatio = .80;
+  } else {
+    lowRatio = .20;
+    highRatio = .80;
+  }
+  final value = lower + range * (lowRatio + random.nextDouble() * (highRatio - lowRatio));
+  return double.parse(value.clamp(lower + range * .01, upper - range * .01).toStringAsFixed(1));
+}
+
+DateTime _generatedRecordTime(
+  Random random,
+  DateTime day,
+  bool morning,
+  DateTime now,
+) {
+  final startMinute = morning ? 11 * 60 + 45 : 20 * 60;
+  final endMinute = morning ? 12 * 60 + 15 : 21 * 60;
+  var availableEnd = endMinute;
+  if (_dateOnly(day) == _dateOnly(now)) {
+    availableEnd = min(endMinute, now.hour * 60 + now.minute);
+  }
+  final minute = startMinute + random.nextInt(availableEnd - startMinute + 1);
+  return DateTime(day.year, day.month, day.day, minute ~/ 60, minute % 60);
+}
+
+Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
+  final now = _albertaNow();
+  final today = _dateOnly(now);
+  final seedStart = DateTime(2026, 5, 1);
+  final previousResult = await _conn.execute(
+    "SELECT value FROM system_runtime_state WHERE key = 'temperature_last_home_opened_at'",
+  );
+  final previousOpen = previousResult.isEmpty
+      ? null
+      : DateTime.tryParse(previousResult.first[0]?.toString() ?? '');
+  final devices = await _conn.execute(
+    'SELECT id, name, location, lower_limit, upper_limit FROM temperature_devices ORDER BY id',
+  );
+  final random = Random();
+  final pending = <({int deviceId, double value, DateTime at})>[];
+
+  for (final device in devices) {
+    final deviceId = device[0] as int;
+    final name = device[1] as String? ?? '';
+    final location = device[2] as String? ?? '';
+    final lower = double.parse(device[3].toString());
+    final upper = double.parse(device[4].toString());
+    final earliestResult = await _conn.execute(
+      'SELECT MIN(recorded_at) FROM temperature_records WHERE device_id = \$1',
+      parameters: [deviceId],
+    );
+    final earliestValue = earliestResult.first[0];
+    final earliest = earliestValue is DateTime
+        ? earliestValue
+        : DateTime.tryParse(earliestValue?.toString() ?? '');
+    var scanStart = previousOpen == null
+        ? seedStart
+        : _dateOnly(previousOpen).subtract(const Duration(days: 1));
+    if (earliest == null || _dateOnly(earliest).isAfter(seedStart)) {
+      scanStart = seedStart;
+    }
+    if (scanStart.isBefore(seedStart)) scanStart = seedStart;
+
+    final existingResult = await _conn.execute(
+      '''SELECT recorded_at FROM temperature_records
+         WHERE device_id = \$1 AND recorded_at >= \$2 AND recorded_at < \$3''',
+      parameters: [deviceId, scanStart, today.add(const Duration(days: 1))],
+    );
+    final slots = <String>{};
+    for (final row in existingResult) {
+      final raw = row[0];
+      final at = raw is DateTime ? raw : DateTime.tryParse(raw.toString());
+      if (at == null) continue;
+      if (_isMorningTemperatureTime(at)) {
+        slots.add('${_temperatureDayKey(at)}-morning');
+      }
+      if (_isEveningTemperatureTime(at)) {
+        slots.add('${_temperatureDayKey(at)}-evening');
+      }
+    }
+
+    for (var day = scanStart;
+        !day.isAfter(today);
+        day = day.add(const Duration(days: 1))) {
+      final dayKey = _temperatureDayKey(day);
+      final isToday = day == today;
+      final nowMinute = now.hour * 60 + now.minute;
+      final morningAvailable = !isToday || nowMinute >= 11 * 60 + 45;
+      final eveningAvailable = !isToday || nowMinute >= 20 * 60;
+      if (morningAvailable && !slots.contains('$dayKey-morning')) {
+        pending.add((
+          deviceId: deviceId,
+          value: _generatedTemperature(
+            random,
+            name,
+            location,
+            lower,
+            upper,
+            true,
+          ),
+          at: _generatedRecordTime(random, day, true, now),
+        ));
+      }
+      if (eveningAvailable && !slots.contains('$dayKey-evening')) {
+        pending.add((
+          deviceId: deviceId,
+          value: _generatedTemperature(
+            random,
+            name,
+            location,
+            lower,
+            upper,
+            false,
+          ),
+          at: _generatedRecordTime(random, day, false, now),
+        ));
+      }
+    }
+  }
+
+  const chunkSize = 250;
+  for (var offset = 0; offset < pending.length; offset += chunkSize) {
+    final chunk = pending.skip(offset).take(chunkSize).toList();
+    final parameters = <dynamic>[];
+    final values = <String>[];
+    for (final record in chunk) {
+      final first = parameters.length + 1;
+      values.add('(\$$first, \$${first + 1}, \$${first + 2}, \$${first + 3})');
+      parameters.addAll([
+        record.deviceId,
+        record.value,
+        record.at,
+        '系统自动补全',
+      ]);
+    }
+    await _conn.execute(
+      'INSERT INTO temperature_records (device_id, temperature, recorded_at, note) VALUES ${values.join(',')}',
+      parameters: parameters,
+    );
+  }
+
+  await _conn.execute(
+    '''INSERT INTO system_runtime_state (key, value, updated_at)
+       VALUES ('temperature_last_home_opened_at', \$1, CURRENT_TIMESTAMP)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP''',
+    parameters: [now.toIso8601String()],
+  );
+  return {
+    'success': true,
+    'created': pending.length,
+    'deviceCount': devices.length,
+    'previousOpenedAt': previousOpen?.toIso8601String(),
+    'openedAt': now.toIso8601String(),
+  };
+}
+
+Future<Response> _ensureTemperatureRecordsOnOpen(Request request) async {
+  try {
+    final future = _temperatureEnsureInFlight ??= _ensureTemperatureRecords();
+    final result = await future;
+    return Response.ok(
+      jsonEncode(result),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } finally {
+    _temperatureEnsureInFlight = null;
   }
 }
 

@@ -2,6 +2,7 @@ import '../widgets/section_navigation.dart';
 import 'package:flutter/material.dart';
 
 import '../services/session_service.dart';
+import '../services/system_service.dart';
 import 'login_page.dart';
 import 'stock_order_page.dart';
 import 'todo_page.dart';
@@ -23,6 +24,20 @@ class _HomePageState extends State<HomePage> {
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
   int get _temperatureIndex => SessionService().canAccessMall ? 3 : 2;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureTemperatureRecords();
+  }
+
+  Future<void> _ensureTemperatureRecords() async {
+    try {
+      await SystemService().ensureTemperatureRecordsOnHomeOpen();
+    } catch (e) {
+      debugPrint('Temperature record check failed: $e');
+    }
+  }
 
   List<Map<String, dynamic>> _menuItems() => [
     {

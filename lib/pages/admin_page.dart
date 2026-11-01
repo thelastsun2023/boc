@@ -16,6 +16,7 @@ import 'user_management_page.dart';
 import 'mall_page.dart';
 import 'procurement_page.dart';
 import 'temperature_page.dart';
+import '../services/system_service.dart';
 
 class AdminPage extends StatefulWidget {
   const AdminPage({super.key});
@@ -31,6 +32,20 @@ class _AdminPageState extends State<AdminPage> {
   bool _isSidebarCollapsed = false;
 
   String _t(String zh, String en) => SessionService().isEnglish ? en : zh;
+
+  @override
+  void initState() {
+    super.initState();
+    _ensureTemperatureRecords();
+  }
+
+  Future<void> _ensureTemperatureRecords() async {
+    try {
+      await SystemService().ensureTemperatureRecordsOnHomeOpen();
+    } catch (e) {
+      debugPrint('Temperature record check failed: $e');
+    }
+  }
 
   List<Map<String, dynamic>> _menuItems() => [
     {
