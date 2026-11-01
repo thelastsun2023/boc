@@ -47,6 +47,118 @@ class _TemperaturePageState extends State<TemperaturePage> {
     }
   }
 
+  static String buildTemperatureExportHtml({
+    required List<Map<String, dynamic>> records,
+    required Map<String, dynamic> device,
+    required DateTime start,
+    required DateTime end,
+    required double lower,
+    required double upper,
+  }) {
+    const escape = HtmlEscape();
+    final sorted = List<Map<String, dynamic>>.from(records)
+      ..sort((a, b) => a['recordedAt'].toString().compareTo(
+            b['recordedAt'].toString(),
+          ));
+    final grouped = <String, List<Map<String, dynamic>>>{};
+    for (final record in sorted) {
+      final recordedAt = DateTime.tryParse(record['recordedAt'].toString());
+      final dayKey = recordedAt == null ? '未指定日期' : _dateText(recordedAt);
+      grouped.putIfAbsent(dayKey, () => []).add(record);
+    }
+
+    const weekdays = ['周一', '周二', '周三', '周四', '周五', '周六', '周日'];
+    final sections = grouped.entries.map((entry) {
+      final firstTime = DateTime.tryParse(entry.value.first['recordedAt'].toString());
+      final weekday = firstTime == null ? '' : ' · ${weekdays[firstTime.weekday - 1]}';
+      final cards = entry.value.map((record) {
+        final recordedAt = DateTime.tryParse(record['recordedAt'].toString());
+        final time = recordedAt == null
+            ? record['recordedAt'].toString()
+            : '${_two(recordedAt.hour)}:${_two(recordedAt.minute)}:${_two(recordedAt.second)}';
+        final value = (record['temperature'] as num).toDouble();
+        final outside = value < lower || value > upper;
+        final note = (record['note'] ?? '').toString().trim();
+        return '''
+          <article class="reading ${outside ? 'alert' : 'normal'}">
+            <div class="reading-top">
+              <span class="time">${escape.convert(time)}</span>
+              <span class="status">${outside ? '超限 / Alert' : '正常 / Normal'}</span>
+            </div>
+            <div class="temperature">${value.toStringAsFixed(1)}<span>°C</span></div>
+            ${note.isEmpty ? '' : '<div class="note"><b>备注 / Corrective action</b><br>${escape.convert(note)}</div>'}
+          </article>
+        ''';
+      }).join();
+      return '''
+        <section class="day-section">
+          <div class="day-heading">
+            <h2>${escape.convert(entry.key)}$weekday</h2>
+            <span>${entry.value.length} 次记录 / readings</span>
+          </div>
+          <div class="reading-grid">$cards</div>
+        </section>
+      ''';
+    }).join();
+
+    final deviceName = escape.convert(device['name'].toString());
+    final location = escape.convert((device['location'] ?? '-').toString());
+    final rangeEnd = end.subtract(const Duration(days: 1));
+    return '''
+      <style>
+        * { box-sizing: border-box; }
+        body { margin: 0; color: #19322d; background: #eef5f2; font-family: Arial, "Microsoft YaHei", sans-serif; }
+        .temperature-report { width: min(920px, calc(100% - 32px)); margin: 20px auto; }
+        .report-header { color: white; padding: 30px; border-radius: 20px; background: linear-gradient(135deg, #0f766e, #115e59); box-shadow: 0 12px 28px rgba(15,118,110,.18); }
+        .eyebrow { margin: 0 0 8px; font-size: 12px; font-weight: 700; letter-spacing: 1.5px; opacity: .8; }
+        h1 { margin: 0 0 18px; font-size: 30px; }
+        .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; }
+        .summary-item { padding: 11px 12px; border: 1px solid rgba(255,255,255,.2); border-radius: 12px; background: rgba(255,255,255,.1); }
+        .summary-label { display: block; margin-bottom: 5px; font-size: 10px; opacity: .72; text-transform: uppercase; }
+        .summary-value { font-size: 13px; font-weight: 700; }
+        .day-section { margin-top: 16px; padding: 18px; border: 1px solid #d7e5df; border-radius: 16px; background: white; break-inside: avoid; box-shadow: 0 5px 16px rgba(25,50,45,.06); }
+        .day-heading { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 13px; }
+        .day-heading h2 { margin: 0; color: #184f47; font-size: 18px; }
+        .day-heading span { color: #6b817b; font-size: 12px; }
+        .reading-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+        .reading { min-height: 112px; padding: 14px 16px; border: 1px solid; border-radius: 13px; break-inside: avoid; }
+        .reading.normal { border-color: #a7d8c5; background: #effaf5; }
+        .reading.alert { border-color: #f3aaa5; background: #fff3f2; }
+        .reading-top { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .time { color: #506b64; font-size: 13px; font-weight: 700; }
+        .status { padding: 4px 8px; border-radius: 999px; font-size: 10px; font-weight: 800; }
+        .normal .status { color: #08734f; background: #d5f3e5; }
+        .alert .status { color: #b42318; background: #ffdeda; }
+        .temperature { margin-top: 8px; color: #123c35; font-size: 29px; font-weight: 800; line-height: 1; }
+        .alert .temperature { color: #b42318; }
+        .temperature span { margin-left: 3px; font-size: 15px; font-weight: 700; }
+        .note { margin-top: 10px; padding-top: 9px; border-top: 1px dashed #e3aaa5; color: #75302a; font-size: 11px; line-height: 1.45; }
+        .report-footer { margin: 18px 4px 0; color: #71857f; font-size: 10px; text-align: right; }
+        @page { size: A4; margin: 12mm; }
+        @media print {
+          body { background: white; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+          .temperature-report { width: 100%; margin: 0; }
+          .report-header { box-shadow: none; }
+          .day-section { box-shadow: none; }
+        }
+      </style>
+      <main class="temperature-report">
+        <header class="report-header">
+          <p class="eyebrow">TEMPERATURE RECORD · 温度记录</p>
+          <h1>$deviceName</h1>
+          <div class="summary">
+            <div class="summary-item"><span class="summary-label">位置 / Location</span><span class="summary-value">$location</span></div>
+            <div class="summary-item"><span class="summary-label">日期 / Period</span><span class="summary-value">${_dateText(start)} — ${_dateText(rangeEnd)}</span></div>
+            <div class="summary-item"><span class="summary-label">正常范围 / Range</span><span class="summary-value">${lower.toStringAsFixed(1)} — ${upper.toStringAsFixed(1)} °C</span></div>
+            <div class="summary-item"><span class="summary-label">记录 / Readings</span><span class="summary-value">${records.length}</span></div>
+          </div>
+        </header>
+        $sections
+        <footer class="report-footer">导出时间 / Exported: ${escape.convert(_dateTimeText(DateTime.now()))}</footer>
+      </main>
+    ''';
+  }
+
   Future<void> _addRecord(Map<String, dynamic> device) async {
     final temperatureController = TextEditingController();
     final noteController = TextEditingController();
@@ -351,9 +463,17 @@ class _TemperatureDetailPageState extends State<TemperatureDetailPage> {
           }
         }, child: const Text('选择日期')),
         TextButton(onPressed: _loading ? null : () async {
-          const escape=HtmlEscape();
-          final rows=_records.map((r)=>'<tr><td>${escape.convert(r['recordedAt'].toString())}</td><td>${r['temperature']}</td><td>${escape.convert((r['note']??'').toString())}</td></tr>').join();
-          await printHtmlDocument(title:'温度记录',htmlContent:'<h1>${escape.convert(widget.device['name'].toString())}</h1><p>${_dateText(_start)} ~ ${_dateText(_end.subtract(const Duration(days:1)))}</p><table border="1" cellpadding="8"><tr><th>时间 / Time</th><th>温度 / °C</th><th>备注 / Corrective action</th></tr>$rows</table>');
+          await printHtmlDocument(
+            title: '温度记录',
+            htmlContent: _TemperaturePageState.buildTemperatureExportHtml(
+              records: _records,
+              device: widget.device,
+              start: _start,
+              end: _end,
+              lower: lower,
+              upper: upper,
+            ),
+          );
         }, child: const Text('导出 / PDF')),
       ]),
       body: Padding(
