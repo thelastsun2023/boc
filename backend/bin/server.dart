@@ -5304,6 +5304,16 @@ String _temperatureDayKey(DateTime value) =>
     '${value.month.toString().padLeft(2, '0')}-'
     '${value.day.toString().padLeft(2, '0')}';
 
+Set<int>? _temperatureActiveDays(dynamic value) {
+  if (value == null) return null;
+  if (value is! Iterable) return <int>{};
+  return value
+      .map((day) => day is int ? day : int.tryParse(day.toString()))
+      .whereType<int>()
+      .where((day) => day >= DateTime.monday && day <= DateTime.sunday)
+      .toSet();
+}
+
 bool _isMorningTemperatureTime(DateTime value) {
   final minute = value.hour * 60 + value.minute;
   return minute >= 11 * 60 + 45 && minute <= 12 * 60 + 15;
@@ -5402,6 +5412,7 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
     final deviceId = device[0] as int;
     final name = device[1] as String? ?? '';
     final location = device[2] as String? ?? '';
+    final activeDays = _temperatureActiveDays(device[5]);
     final lower = double.parse(device[3].toString());
     final upper = double.parse(device[4].toString());
     final earliestResult = await _conn.execute(
@@ -5443,7 +5454,6 @@ Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
         day = day.add(const Duration(days: 1))) {
       final dayKey = _temperatureDayKey(day);
       if (restDays.contains(dayKey)) continue;
-      final activeDays = device[5] as List?;
       if (activeDays != null && !activeDays.contains(day.weekday)) continue;
       final isToday = day == today;
       final nowMinute = now.hour * 60 + now.minute;
