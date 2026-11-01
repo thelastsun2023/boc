@@ -5665,6 +5665,7 @@ Future<Response> _deleteTemperatureDevice(Request request, String id) async {
 }
 
 Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
+  try {
   final deviceId = int.tryParse(id);
   if (deviceId == null) {
     return Response.notFound('Temperature device not found');
@@ -5764,6 +5765,13 @@ Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
       'Cache-Control': 'no-store',
     },
   );
+  } catch (e, st) {
+    print('Public temperature page error: $e\n$st');
+    return Response.internalServerError(
+      body: '页面加载失败 / Page failed to load: $e',
+      headers: {'Content-Type': 'text/plain; charset=utf-8'},
+    );
+  }
 }
 
 Future<Response> _addPublicTemperatureRecord(Request request) async {
