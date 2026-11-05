@@ -19,27 +19,23 @@ class SystemService {
     String specification,
     String? categoryCode,
     String? locationCode,
-    String? primarySupplierCode,
-    String? secondarySupplierCode,
+    List<String> supplierCodes,
     double minQuantity,
-    Uint8List? imageBytes,
-    String? imageFileName, {
+    List<String> imagePaths, {
     String? notesRich,
     List<String>? visibleStoreCodes,
   }) async {
-    final imagePath = await _uploadImage(imageBytes, imageFileName);
     return _post('/api/raw-materials', {
       'nameCN': nameCN,
       'nameEN': nameEN,
       'specification': specification,
       'categoryCode': categoryCode,
       'locationCode': locationCode,
-      'primarySupplierCode': primarySupplierCode,
-      'secondarySupplierCode': secondarySupplierCode,
+      'supplierCodes': supplierCodes,
       'minQuantity': minQuantity,
       if (notesRich != null) 'notesRich': notesRich,
       if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
-      'imagePath': imagePath,
+      'imagePaths': imagePaths,
     }, 'Failed to add raw material');
   }
 
@@ -58,31 +54,25 @@ class SystemService {
     String specification,
     String? categoryCode,
     String? locationCode,
-    String? primarySupplierCode,
-    String? secondarySupplierCode,
+    List<String> supplierCodes,
     double minQuantity,
-    Uint8List? imageBytes,
-    String? imageFileName, {
+    List<String> imagePaths, {
     String? notesRich,
     List<String>? visibleStoreCodes,
   }) async {
     final encodedCode = Uri.encodeComponent(code);
-    final imagePath = await _uploadImage(imageBytes, imageFileName);
     final payload = <String, dynamic>{
       'nameCN': nameCN,
       'nameEN': nameEN,
       'specification': specification,
       'categoryCode': categoryCode,
       'locationCode': locationCode,
-      'primarySupplierCode': primarySupplierCode,
-      'secondarySupplierCode': secondarySupplierCode,
+      'supplierCodes': supplierCodes,
+      'imagePaths': imagePaths,
       'minQuantity': minQuantity,
       if (notesRich != null) 'notesRich': notesRich,
       if (visibleStoreCodes != null) 'visibleStoreCodes': visibleStoreCodes,
     };
-    if (imagePath != null) {
-      payload['imagePath'] = imagePath;
-    }
     return _put(
       '/api/raw-materials/$encodedCode',
       payload,
@@ -965,6 +955,114 @@ class SystemService {
     final encodedUsername = Uri.encodeComponent(username);
     return _delete('/api/users/$encodedUsername', 'Failed to delete user');
   }
+
+  Future<List<Map<String, dynamic>>> getTemperatureDevices() async {
+    final data = await _get(
+      '/api/temperature-devices',
+      'Failed to get temperature devices',
+    );
+    return List<Map<String, dynamic>>.from(data['devices'] ?? []);
+  }
+
+  Future<bool> addTemperatureDevice({
+    required String name,
+    required String location,
+    required double upperLimit,
+    required double lowerLimit,
+    Uint8List? imageBytes,
+    String? imageFileName,
+  }) async {
+    final imagePath = await _uploadImage(imageBytes, imageFileName);
+    return _post('/api/temperature-devices', {
+      'name': name,
+      'location': location,
+      'upperLimit': upperLimit,
+      'lowerLimit': lowerLimit,
+      'imagePath': imagePath,
+    }, 'Failed to add temperature device');
+  }
+
+  Future<bool> updateTemperatureDevice({
+    required int id,
+    required String name,
+    required String location,
+    required double upperLimit,
+    required double lowerLimit,
+    Uint8List? imageBytes,
+    String? imageFileName,
+    bool removeImage = false,
+  }) async {
+    final imagePath = await _uploadImage(imageBytes, imageFileName);
+    final payload = <String, dynamic>{
+      'name': name,
+      'location': location,
+      'upperLimit': upperLimit,
+      'lowerLimit': lowerLimit,
+    };
+    if (imagePath != null || removeImage) {
+      payload['imagePath'] = imagePath;
+    }
+    return _put(
+      '/api/temperature-devices/$id',
+      payload,
+      'Failed to update temperature device',
+    );
+  }
+
+  Future<bool> deleteTemperatureDevice(int id) {
+    return _delete(
+      '/api/temperature-devices/$id',
+      'Failed to delete temperature device',
+    );
+  }
+
+  Future<List<Map<String, dynamic>>> getTemperatureRecords({
+    required int deviceId,
+    required DateTime from,
+    required DateTime to,
+  }) async {
+    final query = Uri(queryParameters: {
+      'deviceId': '$deviceId',
+      'from': from.toIso8601String(),
+      'to': to.toIso8601String(),
+    }).query;
+    final data = await _get(
+      '/api/temperature-records?$query',
+      'Failed to get temperature records',
+    );
+    return List<Map<String, dynamic>>.from(data['records'] ?? []);
+  }
+
+  Future<bool> addTemperatureRecord({
+    required int deviceId,
+    required double temperature,
+    required DateTime recordedAt,
+    String note = '',
+  }) {
+    return _post('/api/temperature-records', {
+      'deviceId': deviceId,
+      'temperature': temperature,
+      'recordedAt': recordedAt.toIso8601String(),
+      'note': note,
+    }, 'Failed to add temperature record');
+  }
+
+  Future<bool> deleteTemperatureRecord(int id) {
+    return _delete(
+      '/api/temperature-records/$id',
+      'Failed to delete temperature record',
+    );
+  }
+
+  Future<bool> ensureTemperatureRecordsOnHomeOpen() {
+    return _post(
+      '/api/temperature-records/ensure',
+      const {},
+      'Failed to ensure temperature records',
+    );
+  }
+  Future<Map<String, dynamic>> getTemperatureSchedule() => _get('/api/temperature-schedule', '读取安排失败');
+  Future<bool> saveTemperatureSchedule(Map<String, dynamic> data) => _post('/api/temperature-schedule', data, '保存安排失败');
 
   Future<Map<String, dynamic>> _get(String path, String message) async {
     try {

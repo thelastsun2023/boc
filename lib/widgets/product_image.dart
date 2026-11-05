@@ -103,3 +103,44 @@ class ProductImage extends StatelessWidget {
     ),
   );
 }
+
+class ProductImageGallery extends StatelessWidget {
+  const ProductImageGallery({
+    super.key,
+    required this.paths,
+    this.title = '',
+    this.width = 220,
+    this.imageSize = 64,
+  });
+
+  final List<String> paths;
+  final String title;
+  final double width;
+  final double imageSize;
+
+  @override
+  Widget build(BuildContext context) {
+    if (paths.isEmpty) {
+      return ProductImage(
+        title: title,
+        width: imageSize,
+        height: imageSize,
+      );
+    }
+    return SizedBox(
+      width: width,
+      height: imageSize,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: paths.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 6),
+        itemBuilder: (context, index) => ProductImage(
+          url: paths[index],
+          title: '$title (${index + 1}/${paths.length})',
+          width: imageSize,
+          height: imageSize,
+        ),
+      ),
+    );
+  }
+}

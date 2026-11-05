@@ -4,11 +4,13 @@ import 'dart:typed_data';
 
 import 'package:crop_your_image/crop_your_image.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../services/session_service.dart';
 import '../services/system_service.dart';
+import '../services/api_base_url.dart';
 
 class SystemManagementPage extends StatefulWidget {
   final int initialTabIndex;
@@ -40,6 +42,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   final List<Map<String, dynamic>> _kitchenTools = [];
   final List<Map<String, dynamic>> _processes = [];
   final List<Map<String, dynamic>> _tools = [];
+  final List<Map<String, dynamic>> _temperatureDevices = [];
   final List<TextEditingController> _reminderPhoneControllers = [];
 
   bool _isLoading = true;
@@ -198,9 +201,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
   @override
   void initState() {
     super.initState();
-    final initialIndex = widget.initialTabIndex.clamp(0, 8);
+    final initialIndex = widget.initialTabIndex.clamp(0, 9);
     _tabController = TabController(
-      length: 9,
+      length: 10,
       vsync: this,
       initialIndex: initialIndex,
     );
@@ -236,6 +239,8 @@ class _SystemManagementPageState extends State<SystemManagementPage>
       final kitchenTools = await _systemService.getKitchenTools();
       final processes = await _systemService.getProcesses();
       final tools = await _systemService.getTools();
+      final temperatureDevices =
+          await _systemService.getTemperatureDevices();
       final smsSettings = await _systemService.getSmsSettings();
 
       if (!mounted) {
@@ -276,6 +281,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _tools
           ..clear()
           ..addAll(tools);
+        _temperatureDevices
+          ..clear()
+          ..addAll(temperatureDevices);
         for (final controller in _reminderPhoneControllers) {
           controller.dispose();
         }
@@ -777,11 +785,43 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         'nameEN': '',
       });
     }
-    String? primarySupplierCode = item?['primarySupplierCode'] as String?;
-    String? secondarySupplierCode = item?['secondarySupplierCode'] as String?;
-    Uint8List? imageBytes = item?['imageBytes'] as Uint8List?;
-    String? imageUrl = item?['imageUrl'] as String?;
-    String? imageFileName = item?['imagePath'] as String?;
+    final supplierCodes = <String>[];
+    final savedSupplierCodes = item?['supplierCodes'];
+    if (savedSupplierCodes is List) {
+      for (final value in savedSupplierCodes) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !supplierCodes.contains(code)) {
+          supplierCodes.add(code);
+        }
+      }
+    } else {
+      for (final value in [
+        item?['primarySupplierCode'],
+        item?['secondarySupplierCode'],
+      ]) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !supplierCodes.contains(code)) {
+          supplierCodes.add(code);
+        }
+      }
+    }
+    String supplierName(String code) {
+      for (final supplier in _suppliers) {
+        if (supplier['code'] == code) {
+          return supplier['name'] as String? ?? code;
+        }
+      }
+      return code;
+    }
+    final imagePaths = <String>[
+      for (final value in item?['imagePaths'] as List? ?? [])
+        if (value?.toString().trim().isNotEmpty == true)
+          value.toString().trim(),
+    ];
+    if (imagePaths.isEmpty && item?['imagePath'] != null) {
+      imagePaths.add(item!['imagePath'].toString());
+    }
+    final pendingImages = <({Uint8List bytes, String fileName})>[];
     String notesRich = item?['notesRich'] as String? ?? '[{"insert":"\\n"}]';
     final hidden = List<String>.from(item?['hiddenStoreCodes'] ?? []);
     final visibleStoreCodes = _stores
@@ -883,56 +923,136 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                   ),
                   const SizedBox(height: 12),
                   if (_regions.isEmpty) const Text('请先在系统管理的区域中添加位置。'),
-                  DropdownButtonFormField<String>(
-                    initialValue: primarySupplierCode,
-                    decoration: const InputDecoration(labelText: '主要供应商'),
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('无主要供应商'),
-                      ),
-                      ..._suppliers.map(
-                        (supplier) => DropdownMenuItem<String>(
-                          value: supplier['code'] as String,
-                          child: Text(supplier['name'] as String? ?? '-'),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      '供应商顺序 / Supplier priority',
+                      style: Theme.of(context).textTheme.titleSmall,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('排名第一的供应商用于订货；可用箭头调整顺序。'),
+                  ),
+                  const SizedBox(height: 8),
+                  if (supplierCodes.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('尚未添加供应商'),
+                    ),
+                  for (var index = 0; index < supplierCodes.length; index++)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 6),
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          border: Border.all(
+                            color: index == 0
+                                ? Theme.of(context).colorScheme.primary
+                                : Theme.of(context).dividerColor,
+                          ),
+                          borderRadius: BorderRadius.circular(9),
+                        ),
+                        child: Row(
+                          children: [
+                            CircleAvatar(
+                              radius: 13,
+                              child: Text('${index + 1}'),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                supplierName(supplierCodes[index]),
+                              ),
+                            ),
+                            if (index == 0)
+                              const Padding(
+                                padding: EdgeInsets.only(right: 4),
+                                child: Text(
+                                  '订货',
+                                  style: TextStyle(fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '上移',
+                              onPressed: index == 0
+                                  ? null
+                                  : () => setDialogState(() {
+                                      final value = supplierCodes.removeAt(index);
+                                      supplierCodes.insert(index - 1, value);
+                                    }),
+                              icon: const Icon(Icons.arrow_upward),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '下移',
+                              onPressed: index == supplierCodes.length - 1
+                                  ? null
+                                  : () => setDialogState(() {
+                                      final value = supplierCodes.removeAt(index);
+                                      supplierCodes.insert(index + 1, value);
+                                    }),
+                              icon: const Icon(Icons.arrow_downward),
+                            ),
+                            IconButton(
+                              visualDensity: VisualDensity.compact,
+                              tooltip: '移除',
+                              onPressed: () => setDialogState(
+                                () => supplierCodes.removeAt(index),
+                              ),
+                              icon: const Icon(Icons.remove_circle_outline),
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                    onChanged: (value) {
-                      setDialogState(() {
-                        primarySupplierCode = value;
-                        if (secondarySupplierCode == value) {
-                          secondarySupplierCode = null;
-                        }
-                      });
-                    },
-                  ),
-                  const SizedBox(height: 12),
-                  DropdownButtonFormField<String>(
-                    initialValue: secondarySupplierCode,
-                    decoration: const InputDecoration(labelText: '次要供应商'),
-                    items: [
-                      const DropdownMenuItem<String>(
-                        value: null,
-                        child: Text('无次要供应商'),
-                      ),
-                      ..._suppliers
-                          .where(
-                            (supplier) =>
-                                supplier['code'] != primarySupplierCode,
-                          )
-                          .map(
-                            (supplier) => DropdownMenuItem<String>(
-                              value: supplier['code'] as String,
-                              child: Text(supplier['name'] as String? ?? '-'),
-                            ),
-                          ),
-                    ],
-                    onChanged: (value) {
-                      setDialogState(() {
-                        secondarySupplierCode = value;
-                      });
-                    },
+                    ),
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: OutlinedButton.icon(
+                      onPressed: supplierCodes.length >= _suppliers.length
+                          ? null
+                          : () async {
+                              final available = _suppliers
+                                  .where(
+                                    (supplier) => !supplierCodes.contains(
+                                      supplier['code'],
+                                    ),
+                                  )
+                                  .toList();
+                              final selected = await showDialog<String>(
+                                context: context,
+                                builder: (pickerContext) => SimpleDialog(
+                                  title: const Text('添加供应商'),
+                                  children: available
+                                      .map(
+                                        (supplier) => SimpleDialogOption(
+                                          onPressed: () => Navigator.pop(
+                                            pickerContext,
+                                            supplier['code'] as String,
+                                          ),
+                                          child: Text(
+                                            supplier['name'] as String? ??
+                                                supplier['code'] as String,
+                                          ),
+                                        ),
+                                      )
+                                      .toList(),
+                                ),
+                              );
+                              if (selected != null) {
+                                setDialogState(
+                                  () => supplierCodes.add(selected),
+                                );
+                              }
+                            },
+                      icon: const Icon(Icons.add),
+                      label: const Text('添加供应商'),
+                    ),
                   ),
                   const SizedBox(height: 12),
                   TextField(
@@ -943,66 +1063,87 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     ),
                   ),
                   const SizedBox(height: 12),
-                  FilledButton.icon(
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: FilledButton.icon(
                     onPressed: isSubmitting
                         ? null
                         : () async {
                             final picked = await _pickAndEditImage();
                             if (picked != null) {
                               setDialogState(() {
-                                imageBytes = picked.bytes;
-                                imageFileName = picked.fileName;
-                                imageUrl = null;
+                                pendingImages.add(picked);
                               });
                             }
                           },
                     icon: const Icon(Icons.image_outlined),
-                    label: Text(
-                      imageBytes != null || imageUrl != null ? '更换照片' : '上传照片',
+                    label: const Text('添加照片 / Add Photo'),
                     ),
                   ),
                   const SizedBox(height: 12),
-                  if (imageBytes != null)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.memory(
-                        imageBytes!,
-                        width: 180,
-                        height: 180,
-                        fit: BoxFit.cover,
-                      ),
-                    )
-                  else if (imageUrl?.isNotEmpty == true)
-                    ClipRRect(
-                      borderRadius: BorderRadius.circular(8),
-                      child: Image.network(
-                        _displayImageUrl(imageUrl!),
-                        width: 180,
-                        height: 180,
-                        fit: BoxFit.cover,
-                        errorBuilder: (context, error, stackTrace) =>
-                            const SizedBox(
-                              width: 180,
-                              height: 180,
-                              child: DecoratedBox(
-                                decoration: BoxDecoration(
-                                  color: Color(0x11000000),
-                                ),
-                                child: Icon(Icons.broken_image, size: 40),
-                              ),
-                            ),
-                      ),
+                  if (imagePaths.isEmpty && pendingImages.isEmpty)
+                    const Align(
+                      alignment: Alignment.centerLeft,
+                      child: Text('暂无照片 / No photos'),
                     )
                   else
-                    const SizedBox(
-                      width: 180,
-                      height: 180,
-                      child: DecoratedBox(
-                        decoration: BoxDecoration(color: Color(0x11000000)),
-                        child: Icon(
-                          Icons.image_not_supported_outlined,
-                          size: 40,
-                        ),
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: Wrap(
+                        spacing: 8,
+                        runSpacing: 8,
+                        children: [
+                          for (var index = 0; index < imagePaths.length; index++)
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ProductImage(
+                                  url: imagePaths[index],
+                                  title: nameCNController.text.trim(),
+                                  width: 86,
+                                  height: 86,
+                                ),
+                                Positioned(
+                                  right: -6,
+                                  top: -6,
+                                  child: IconButton.filled(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: '删除照片',
+                                    onPressed: () => setDialogState(
+                                      () => imagePaths.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          for (var index = 0;
+                              index < pendingImages.length;
+                              index++)
+                            Stack(
+                              clipBehavior: Clip.none,
+                              children: [
+                                ProductImage(
+                                  bytes: pendingImages[index].bytes,
+                                  title: nameCNController.text.trim(),
+                                  width: 86,
+                                  height: 86,
+                                ),
+                                Positioned(
+                                  right: -6,
+                                  top: -6,
+                                  child: IconButton.filled(
+                                    visualDensity: VisualDensity.compact,
+                                    tooltip: '删除照片',
+                                    onPressed: () => setDialogState(
+                                      () => pendingImages.removeAt(index),
+                                    ),
+                                    icon: const Icon(Icons.close, size: 16),
+                                  ),
+                                ),
+                              ],
+                            ),
+                        ],
                       ),
                     ),
                   const SizedBox(height: 16),
@@ -1075,6 +1216,14 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                         isSubmitting = true;
                       });
                       try {
+                        final savedImagePaths = List<String>.from(imagePaths);
+                        for (final image in pendingImages) {
+                          final path = await _systemService.uploadImage(
+                            image.bytes,
+                            image.fileName,
+                          );
+                          if (path != null) savedImagePaths.add(path);
+                        }
                         final success = isEdit
                             ? await _systemService.updateRawMaterial(
                                 item['code'] as String,
@@ -1083,11 +1232,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 specificationController.text.trim(),
                                 categoryCode,
                                 locationCode,
-                                primarySupplierCode,
-                                secondarySupplierCode,
+                                List<String>.from(supplierCodes),
                                 minQuantity,
-                                imageBytes,
-                                imageFileName,
+                                savedImagePaths,
                                 notesRich: notesRich,
                                 visibleStoreCodes: visibleStoreCodes.toList(),
                               )
@@ -1097,11 +1244,9 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                 specificationController.text.trim(),
                                 categoryCode,
                                 locationCode,
-                                primarySupplierCode,
-                                secondarySupplierCode,
+                                List<String>.from(supplierCodes),
                                 minQuantity,
-                                imageBytes,
-                                imageFileName,
+                                savedImagePaths,
                                 notesRich: notesRich,
                                 visibleStoreCodes: visibleStoreCodes.toList(),
                               );
@@ -2485,6 +2630,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         _buildProcessTab(),
         _buildToolTab(),
         _buildReminderTab(),
+        _buildTemperatureDeviceTab(),
       ],
     );
   }
@@ -2510,6 +2656,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
             Tab(text: '工艺'),
             Tab(text: '工具'),
             Tab(text: '提醒'),
+            Tab(text: '温度设备'),
           ],
         ),
         actions: [
@@ -2854,22 +3001,46 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                     itemCount: filteredRawMaterials.length,
                     itemBuilder: (context, index) {
                       final item = filteredRawMaterials[index];
-                      final imageBytes = item['imageBytes'] as Uint8List?;
                       final imageUrl = item['imageUrl'] as String?;
+                      final materialImagePaths = <String>[
+                        for (final value in item['imagePaths'] as List? ?? [])
+                          if (value?.toString().trim().isNotEmpty == true)
+                            value.toString().trim(),
+                      ];
+                      if (materialImagePaths.isEmpty &&
+                          imageUrl?.isNotEmpty == true) {
+                        materialImagePaths.add(imageUrl!);
+                      }
                       final displayName = _orderedName(
                         item['nameCN'] as String?,
                         item['nameEN'] as String?,
                       );
+                      final rankedSupplierCodes = <String>[
+                        for (final value in item['supplierCodes'] as List? ?? [])
+                          if (value?.toString().trim().isNotEmpty == true)
+                            value.toString().trim(),
+                      ];
+                      final rankedSupplierNames = [
+                        for (var i = 0; i < rankedSupplierCodes.length; i++)
+                          '${i + 1}. ${_suppliers.firstWhere(
+                            (supplier) =>
+                                supplier['code'] == rankedSupplierCodes[i],
+                            orElse: () => {
+                              'name': rankedSupplierCodes[i],
+                            },
+                          )['name']}',
+                      ].join('  ');
                       return Card(
                         child: Padding(
                           padding: const EdgeInsets.all(12),
                           child: Row(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              ProductImage(
-                                url: imageUrl,
-                                bytes: imageBytes,
+                              ProductImageGallery(
+                                paths: materialImagePaths,
                                 title: displayName,
+                                width: 154,
+                                imageSize: 64,
                               ),
                               const SizedBox(width: 12),
                               Expanded(
@@ -2893,10 +3064,7 @@ class _SystemManagementPageState extends State<SystemManagementPage>
                                       'Location: ${_orDash(item['locationName'] as String?)}',
                                     ),
                                     Text(
-                                      'Primary Supplier: ${_orDash(item['primarySupplierName'] as String?)}',
-                                    ),
-                                    Text(
-                                      'Secondary Supplier: ${_orDash(item['secondarySupplierName'] as String?)}',
+                                      'Suppliers: ${rankedSupplierNames.isEmpty ? '-' : rankedSupplierNames}',
                                     ),
                                     Text(
                                       'Minimum Quantity: ${item['minQuantity'] ?? 0}',
@@ -3002,6 +3170,365 @@ class _SystemManagementPageState extends State<SystemManagementPage>
         ],
       ),
     );
+  }
+
+  Future<void> _showTemperatureDeviceDialog({
+    Map<String, dynamic>? item,
+  }) async {
+    final nameController = TextEditingController(
+      text: item?['name'] as String? ?? '',
+    );
+    final locationController = TextEditingController(
+      text: item?['location'] as String? ?? '',
+    );
+    final upperController = TextEditingController(
+      text: item?['upperLimit']?.toString() ?? '',
+    );
+    final lowerController = TextEditingController(
+      text: item?['lowerLimit']?.toString() ?? '',
+    );
+    ({Uint8List bytes, String fileName})? pickedImage;
+    var removeImage = false;
+    var saving = false;
+    final saved = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: Text(item == null ? '新增温度设备' : '编辑温度设备'),
+          content: SizedBox(
+            width: 460,
+            child: SingleChildScrollView(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    decoration: const InputDecoration(labelText: '名称 *'),
+                  ),
+                  TextField(
+                    controller: locationController,
+                    decoration: const InputDecoration(labelText: '位置 *'),
+                  ),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: lowerController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '下限（°C）*',
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: TextField(
+                          controller: upperController,
+                          keyboardType: const TextInputType.numberWithOptions(
+                            decimal: true,
+                            signed: true,
+                          ),
+                          decoration: const InputDecoration(
+                            labelText: '上限（°C）*',
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      if (pickedImage != null)
+                        Image.memory(
+                          pickedImage!.bytes,
+                          width: 90,
+                          height: 90,
+                          fit: BoxFit.cover,
+                        )
+                      else
+                        ProductImage(
+                          url: removeImage
+                              ? null
+                              : item?['imageUrl'] as String? ??
+                                  item?['imagePath'] as String?,
+                          title: nameController.text,
+                          width: 90,
+                          height: 90,
+                        ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            OutlinedButton.icon(
+                              onPressed: () async {
+                                final picked = await _pickImageAsset();
+                                if (picked == null) return;
+                                setDialogState(() {
+                                  pickedImage = picked;
+                                  removeImage = false;
+                                });
+                              },
+                              icon: const Icon(Icons.image_outlined),
+                              label: const Text('选择图片（可选）'),
+                            ),
+                            if (item?['imagePath'] != null)
+                              CheckboxListTile(
+                                contentPadding: EdgeInsets.zero,
+                                value: removeImage,
+                                onChanged: (value) => setDialogState(() {
+                                  removeImage = value == true;
+                                  if (removeImage) pickedImage = null;
+                                }),
+                                title: const Text('移除现有图片'),
+                                controlAffinity:
+                                    ListTileControlAffinity.leading,
+                              ),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: saving ? null : () => Navigator.pop(context, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: saving
+                  ? null
+                  : () async {
+                      final name = nameController.text.trim();
+                      final location = locationController.text.trim();
+                      final upper = double.tryParse(upperController.text.trim());
+                      final lower = double.tryParse(lowerController.text.trim());
+                      if (name.isEmpty ||
+                          location.isEmpty ||
+                          upper == null ||
+                          lower == null ||
+                          lower >= upper) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text('请填写完整，且下限必须小于上限'),
+                          ),
+                        );
+                        return;
+                      }
+                      setDialogState(() => saving = true);
+                      try {
+                        final success = item == null
+                            ? await _systemService.addTemperatureDevice(
+                                name: name,
+                                location: location,
+                                upperLimit: upper,
+                                lowerLimit: lower,
+                                imageBytes: pickedImage?.bytes,
+                                imageFileName: pickedImage?.fileName,
+                              )
+                            : await _systemService.updateTemperatureDevice(
+                                id: item['id'] as int,
+                                name: name,
+                                location: location,
+                                upperLimit: upper,
+                                lowerLimit: lower,
+                                imageBytes: pickedImage?.bytes,
+                                imageFileName: pickedImage?.fileName,
+                                removeImage: removeImage,
+                              );
+                        if (context.mounted) Navigator.pop(context, success);
+                      } catch (e) {
+                        setDialogState(() => saving = false);
+                        if (context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(content: Text('保存失败：$e')),
+                          );
+                        }
+                      }
+                    },
+              child: saving
+                  ? const SizedBox(
+                      width: 18,
+                      height: 18,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Text('保存'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (saved == true) await _loadAllData();
+  }
+
+  Widget _buildTemperatureDeviceTab() {
+    return Padding(
+      padding: const EdgeInsets.all(12),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              FilledButton.icon(
+                onPressed: () => _showTemperatureDeviceDialog(),
+                icon: const Icon(Icons.add),
+                label: const Text('新增温度设备'),
+              ),
+              const SizedBox(width: 12),
+              const Text('设备图片为可选项'),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Expanded(
+            child: _temperatureDevices.isEmpty
+                ? const Center(child: Text('暂无温度设备'))
+                : ListView.builder(
+                    itemCount: _temperatureDevices.length,
+                    itemBuilder: (context, index) {
+                      final item = _temperatureDevices[index];
+                      final latest =
+                          (item['latestTemperature'] as num?)?.toDouble();
+                      final low = (item['lowerLimit'] as num).toDouble();
+                      final high = (item['upperLimit'] as num).toDouble();
+                      final alert =
+                          latest != null && (latest < low || latest > high);
+                      return Card(
+                        child: ListTile(
+                          leading: ProductImage(
+                            url: item['imageUrl'] as String? ??
+                                item['imagePath'] as String?,
+                            title: item['name'] as String? ?? '',
+                            width: 64,
+                            height: 64,
+                          ),
+                          title: Text(item['name'] as String? ?? ''),
+                          subtitle: Text(
+                            '位置：${item['location']}  ·  范围：$low ～ $high °C'
+                            '${latest == null ? '' : '  ·  最新：${latest.toStringAsFixed(1)} °C'}',
+                          ),
+                          trailing: Wrap(
+                            spacing: 8,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              if (alert)
+                                const Icon(Icons.warning_amber, color: Colors.red),
+                              IconButton(
+                                onPressed: () => _showTemperatureQrCode(item),
+                                icon: const Icon(Icons.qr_code_2),
+                                tooltip: '生成二维码',
+                              ),
+                              IconButton(onPressed: () => _temperatureWeekdays(item), icon: const Icon(Icons.date_range), tooltip: '是否按天 / Weekdays'),
+                              IconButton(
+                                onPressed: () =>
+                                    _showTemperatureDeviceDialog(item: item),
+                                icon: const Icon(Icons.edit_outlined),
+                                tooltip: '编辑',
+                              ),
+                              IconButton(
+                                onPressed: () => _confirmDelete(
+                                  title: item['name'] as String? ?? '温度设备',
+                                  onDelete: () => _systemService
+                                      .deleteTemperatureDevice(item['id'] as int),
+                                ),
+                                icon: const Icon(Icons.delete_outline),
+                                tooltip: '删除',
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _showTemperatureQrCode(Map<String, dynamic> item) async {
+    final publicUrl = Uri.parse(getBaseUrl())
+        .resolve('/temperature-entry/${item['id']}')
+        .toString();
+    final qrUrl = Uri.https(
+      'api.qrserver.com',
+      '/v1/create-qr-code/',
+      {'size': '360x360', 'data': publicUrl},
+    ).toString();
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${item['name']} · 温度录入二维码'),
+        content: SizedBox(
+          width: 420,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 360,
+                height: 360,
+                padding: const EdgeInsets.all(10),
+                color: Colors.white,
+                child: Image.network(
+                  qrUrl,
+                  fit: BoxFit.contain,
+                  errorBuilder: (_, _, _) => const Center(
+                    child: Text('二维码加载失败，请检查网络后重试'),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              const Text('扫码后无需登录，可直接填写设备温度。'),
+              const SizedBox(height: 8),
+              SelectableText(
+                publicUrl,
+                textAlign: TextAlign.center,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: publicUrl));
+              if (context.mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('链接已复制')),
+                );
+              }
+            },
+            icon: const Icon(Icons.copy),
+            label: const Text('复制链接'),
+          ),
+          FilledButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _temperatureWeekdays(Map<String, dynamic> item) async {
+    final data = await _systemService.getTemperatureSchedule();
+    final config = (data['devices'] as List).firstWhere((d) => d['id'] == item['id']);
+    var enabled = config['days'] != null;
+    final days = Set<int>.from(config['days'] ?? [1,2,3,4,5,6,7]);
+    if (!mounted) return;
+    final save = await showDialog<bool>(context: context, builder: (context) => StatefulBuilder(builder: (context, update) => AlertDialog(
+      title: Text('${item['name']} · 自动生成日期'),
+      content: Column(mainAxisSize: MainAxisSize.min, children: [
+        CheckboxListTile(title: const Text('是否按天 / Selected weekdays'), value: enabled, onChanged: (v) => update(() => enabled = v!)),
+        if (enabled) for (var i=1;i<=7;i++) CheckboxListTile(title: Text(['周一','周二','周三','周四','周五','周六','周日'][i-1]), value: days.contains(i), onChanged: (v) => update(() { if(v!) {days.add(i);} else {days.remove(i);} })),
+      ]), actions: [TextButton(onPressed: () => Navigator.pop(context,false), child: const Text('取消')), FilledButton(onPressed: () => Navigator.pop(context,true), child: const Text('保存'))],
+    )));
+    if(save == true) await _systemService.saveTemperatureSchedule({'deviceId': item['id'], 'days': enabled ? days.toList() : null});
   }
 
   Widget _buildReminderTab() {

@@ -147,6 +147,8 @@ const List<String> _serialIdTables = [
   'finance_records',
   'todo_tasks',
   'stock_orders',
+  'temperature_devices',
+  'temperature_records',
   'kitchen_tools',
   'processes',
   'tools',
@@ -273,11 +275,33 @@ Future<void> initDb() async {
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS image_path VARCHAR(255)',
   );
   await _conn.execute(
+    'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS image_paths TEXT[]',
+  );
+  await _conn.execute('''
+    UPDATE raw_materials
+    SET image_paths = CASE
+      WHEN image_path IS NULL OR TRIM(image_path) = '' THEN ARRAY[]::text[]
+      ELSE ARRAY[image_path::text]
+    END
+    WHERE image_paths IS NULL
+  ''');
+  await _conn.execute(
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS primary_supplier_code VARCHAR(50)',
   );
   await _conn.execute(
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS secondary_supplier_code VARCHAR(50)',
   );
+  await _conn.execute(
+    'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS supplier_codes TEXT[]',
+  );
+  await _conn.execute('''
+    UPDATE raw_materials
+    SET supplier_codes = ARRAY_REMOVE(
+      ARRAY[primary_supplier_code::text, secondary_supplier_code::text],
+      NULL
+    )
+    WHERE supplier_codes IS NULL
+  ''');
   await _conn.execute(
     'ALTER TABLE raw_materials ADD COLUMN IF NOT EXISTS category_code VARCHAR(50)',
   );
@@ -398,6 +422,84 @@ Future<void> initDb() async {
     INSERT INTO sms_settings (id)
     VALUES (1)
     ON CONFLICT (id) DO NOTHING
+  ''');
+
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS temperature_devices (
+      id SERIAL PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      location VARCHAR(255) NOT NULL,
+      upper_limit NUMERIC(8, 2) NOT NULL,
+      lower_limit NUMERIC(8, 2) NOT NULL,
+      image_path VARCHAR(255),
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS temperature_records (
+      id SERIAL PRIMARY KEY,
+      device_id INTEGER NOT NULL REFERENCES temperature_devices(id) ON DELETE CASCADE,
+      temperature NUMERIC(8, 2) NOT NULL,
+      recorded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+      note TEXT,
+      created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  await _conn.execute(
+    'CREATE INDEX IF NOT EXISTS idx_temperature_records_device_time ON temperature_records (device_id, recorded_at DESC)',
+  );
+  await _conn.execute('ALTER TABLE temperature_devices ADD COLUMN IF NOT EXISTS active_days INTEGER[]');
+  await _conn.execute('CREATE TABLE IF NOT EXISTS temperature_rest_days (day DATE PRIMARY KEY)');
+  await _conn.execute(
+    "UPDATE temperature_records SET recorded_at = recorded_at + ((1 + FLOOR(RANDOM() * 59)) * INTERVAL '1 second') WHERE note IN ('系统自动补全', '系统自动补全数据') AND EXTRACT(SECOND FROM recorded_at) = 0",
+  );
+  await _conn.execute(
+    "UPDATE temperature_records SET note = NULL WHERE note IN ('系统自动补全', '系统自动补全数据')",
+  );
+  await _conn.execute('''
+    CREATE TABLE IF NOT EXISTS system_runtime_state (
+      key VARCHAR(100) PRIMARY KEY,
+      value TEXT,
+      updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+  ''');
+  // One-time production cleanups. These only delete readings; device settings,
+  // including active weekdays, remain unchanged and home-page backfill stays on.
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_refrigerator_v1', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood refrigerator'
+  ''');
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_display_cabinet_v1', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood insulated display cabinet'
+  ''');
+  await _conn.execute('''
+    WITH cleanup AS (
+      INSERT INTO system_runtime_state (key, value, updated_at)
+      VALUES ('temperature_records_cleared_seafood_display_cabinet_v2', 'true', CURRENT_TIMESTAMP)
+      ON CONFLICT (key) DO NOTHING
+      RETURNING key
+    )
+    DELETE FROM temperature_records r
+    USING temperature_devices d, cleanup
+    WHERE r.device_id = d.id
+      AND LOWER(TRIM(d.name)) = 'seafood insulated display cabinet'
   ''');
 
   // Create semi_products table
@@ -874,6 +976,19 @@ final _router = Router()
   ..get('/api/stores', _getStores)
   ..put('/api/stores/<code>', _updateStore)
   ..delete('/api/stores/<code>', _deleteStore)
+  // Temperature devices and readings
+  ..post('/api/temperature-devices', _addTemperatureDevice)
+  ..get('/api/temperature-devices', _getTemperatureDevices)
+  ..put('/api/temperature-devices/<id>', _updateTemperatureDevice)
+  ..delete('/api/temperature-devices/<id>', _deleteTemperatureDevice)
+  ..post('/api/temperature-records', _addTemperatureRecord)
+  ..post('/api/public/temperature-records', _addPublicTemperatureRecord)
+  ..get('/api/temperature-records', _getTemperatureRecords)
+  ..delete('/api/temperature-records/<id>', _deleteTemperatureRecord)
+  ..post('/api/temperature-records/ensure', _ensureTemperatureRecordsOnOpen)
+  ..get('/api/temperature-schedule', _temperatureSchedule)
+  ..post('/api/temperature-schedule', _temperatureSchedule)
+  ..get('/temperature-entry/<id>', _publicTemperatureEntryPage)
   // Semi Products
   ..post('/api/semi-products', _addSemiProduct)
   ..get('/api/semi-products', _getSemiProducts)
@@ -1635,6 +1750,39 @@ double _normalizedMinQuantity(dynamic value) {
 }
 
 // Raw Materials APIs
+List<String> _rawMaterialSupplierCodes(Map<String, dynamic> json) {
+  final values = json['supplierCodes'];
+  final candidates = values is List
+      ? values
+      : [json['primarySupplierCode'], json['secondarySupplierCode']];
+  final result = <String>[];
+  for (final value in candidates) {
+    final code = _normalizedOptionalString(value);
+    if (code != null && !result.contains(code)) result.add(code);
+  }
+  return result;
+}
+
+List<String> _rawMaterialImagePaths(Map<String, dynamic> json) {
+  final values = json['imagePaths'];
+  final candidates = values is List ? values : [json['imagePath']];
+  final result = <String>[];
+  for (final value in candidates) {
+    final path = _normalizedOptionalString(value);
+    if (path != null && !result.contains(path)) result.add(path);
+  }
+  return result;
+}
+
+Future<bool> _rawMaterialSuppliersExist(List<String> codes) async {
+  if (codes.isEmpty) return true;
+  final result = await _conn.execute(
+    'SELECT COUNT(*) FROM suppliers WHERE code = ANY(\$1::text[])',
+    parameters: [codes],
+  );
+  return int.tryParse(result.first[0].toString()) == codes.length;
+}
+
 Future<Response> _addRawMaterial(Request request) async {
   final denied = await _requireUserAdmin(request);
   if (denied != null) return denied;
@@ -1646,13 +1794,14 @@ Future<Response> _addRawMaterial(Request request) async {
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
-    final imagePath = _normalizedOptionalString(json['imagePath']);
-    final primarySupplierCode = _normalizedOptionalString(
-      json['primarySupplierCode'],
-    );
-    final secondarySupplierCode = _normalizedOptionalString(
-      json['secondarySupplierCode'],
-    );
+    final imagePaths = _rawMaterialImagePaths(json);
+    final imagePath = imagePaths.isEmpty ? null : imagePaths.first;
+    final supplierCodes = _rawMaterialSupplierCodes(json);
+    if (!await _rawMaterialSuppliersExist(supplierCodes)) {
+      return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
+    }
+    final primarySupplierCode = supplierCodes.isEmpty ? null : supplierCodes[0];
+    final secondarySupplierCode = supplierCodes.length < 2 ? null : supplierCodes[1];
     final categoryCode = _normalizedOptionalString(json['categoryCode']);
     final locationCode = _normalizedOptionalString(json['locationCode']);
     final minQuantity = _normalizedMinQuantity(json['minQuantity']);
@@ -1678,12 +1827,14 @@ Future<Response> _addRawMaterial(Request request) async {
         name_en,
         specification,
         image_path,
+        image_paths,
         primary_supplier_code,
         secondary_supplier_code,
+        supplier_codes,
         category_code,
         location_code,
         min_quantity
-      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10)
+      ) VALUES (\$1, \$2, \$3, \$4, \$5, \$6, \$7, \$8, \$9, \$10, \$11, \$12)
       ''',
       parameters: [
         finalCode,
@@ -1691,8 +1842,10 @@ Future<Response> _addRawMaterial(Request request) async {
         nameEN,
         specification,
         imagePath,
+        imagePaths,
         primarySupplierCode,
         secondarySupplierCode,
+        supplierCodes,
         categoryCode,
         locationCode,
         minQuantity,
@@ -1747,7 +1900,21 @@ Future<Response> _getRawMaterials(Request request) async {
         rc.name_en,
         COALESCE(reg.name_cn, rl.name),
         rm.notes_rich,
-        ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code)
+        ARRAY(SELECT h.store_code FROM raw_material_hidden_stores h WHERE h.material_code=rm.code),
+        COALESCE(
+          rm.supplier_codes,
+          ARRAY_REMOVE(
+            ARRAY[rm.primary_supplier_code::text, rm.secondary_supplier_code::text],
+            NULL
+          )
+        ),
+        COALESCE(
+          rm.image_paths,
+          CASE
+            WHEN rm.image_path IS NULL OR TRIM(rm.image_path) = '' THEN ARRAY[]::text[]
+            ELSE ARRAY[rm.image_path::text]
+          END
+        )
       FROM raw_materials rm
       LEFT JOIN suppliers ps ON ps.code = rm.primary_supplier_code
       LEFT JOIN suppliers ss ON ss.code = rm.secondary_supplier_code
@@ -1780,6 +1947,12 @@ Future<Response> _getRawMaterials(Request request) async {
               'locationName': row[14],
               'notesRich': row[15],
               'hiddenStoreCodes': row[16],
+              'supplierCodes': row[17],
+              'imagePaths': row[18],
+              'imageUrls': (row[18] as List)
+                  .map((path) => _imageUrlFromPath(path?.toString()))
+                  .whereType<String>()
+                  .toList(),
             })
         .toList();
 
@@ -1959,14 +2132,16 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
     final nameCN = json['nameCN'] as String?;
     final nameEN = _normalizedOptionalString(json['nameEN']);
     final specification = _normalizedOptionalString(json['specification']);
-    final hasImagePath = json.containsKey('imagePath');
-    final imagePath = _normalizedOptionalString(json['imagePath']);
-    final primarySupplierCode = _normalizedOptionalString(
-      json['primarySupplierCode'],
-    );
-    final secondarySupplierCode = _normalizedOptionalString(
-      json['secondarySupplierCode'],
-    );
+    final hasImagePaths =
+        json.containsKey('imagePaths') || json.containsKey('imagePath');
+    final imagePaths = _rawMaterialImagePaths(json);
+    final imagePath = imagePaths.isEmpty ? null : imagePaths.first;
+    final supplierCodes = _rawMaterialSupplierCodes(json);
+    if (!await _rawMaterialSuppliersExist(supplierCodes)) {
+      return _mallJson({'error': 'Supplier must be selected from the supplier list'}, 400);
+    }
+    final primarySupplierCode = supplierCodes.isEmpty ? null : supplierCodes[0];
+    final secondarySupplierCode = supplierCodes.length < 2 ? null : supplierCodes[1];
     final categoryCode = _normalizedOptionalString(json['categoryCode']);
     final locationCode = _normalizedOptionalString(json['locationCode']);
     final minQuantity = _normalizedMinQuantity(json['minQuantity']);
@@ -1981,10 +2156,10 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
       );
     }
 
-    String? finalImagePath;
-    if (hasImagePath) {
+    final oldImagePaths = <String>[];
+    if (hasImagePaths) {
       final existing = await _conn.execute(
-        'SELECT image_path FROM raw_materials WHERE code = \$1',
+        'SELECT image_path, image_paths FROM raw_materials WHERE code = \$1',
         parameters: [code],
       );
       if (existing.isEmpty) {
@@ -1997,15 +2172,19 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
         );
       }
 
-      final oldImagePath = existing.first[0] as String?;
-      finalImagePath = imagePath;
-      if (oldImagePath != null && oldImagePath != finalImagePath) {
-        await _deleteUploadedImage(oldImagePath);
+      final savedPaths = existing.first[1];
+      if (savedPaths is List) {
+        oldImagePaths.addAll(
+          savedPaths.map((path) => path.toString()).where((path) => path.isNotEmpty),
+        );
+      } else {
+        final oldImagePath = existing.first[0] as String?;
+        if (oldImagePath?.isNotEmpty == true) oldImagePaths.add(oldImagePath!);
       }
     }
 
     final result = await _conn.execute(
-      hasImagePath
+      hasImagePaths
           ? '''
             UPDATE raw_materials
             SET
@@ -2013,12 +2192,14 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               name_en = \$2,
               specification = \$3,
               image_path = \$4,
-              primary_supplier_code = \$5,
-              secondary_supplier_code = \$6,
-              category_code = \$7,
-              location_code = \$8,
-              min_quantity = \$9
-            WHERE code = \$10
+              image_paths = \$5,
+              primary_supplier_code = \$6,
+              secondary_supplier_code = \$7,
+              supplier_codes = \$8,
+              category_code = \$9,
+              location_code = \$10,
+              min_quantity = \$11
+            WHERE code = \$12
             '''
           : '''
             UPDATE raw_materials
@@ -2028,19 +2209,22 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               specification = \$3,
               primary_supplier_code = \$4,
               secondary_supplier_code = \$5,
-              category_code = \$6,
-              location_code = \$7,
-              min_quantity = \$8
-            WHERE code = \$9
+              supplier_codes = \$6,
+              category_code = \$7,
+              location_code = \$8,
+              min_quantity = \$9
+            WHERE code = \$10
             ''',
-      parameters: hasImagePath
+      parameters: hasImagePaths
           ? [
               nameCN.trim(),
               nameEN,
               specification,
-              finalImagePath,
+              imagePath,
+              imagePaths,
               primarySupplierCode,
               secondarySupplierCode,
+              supplierCodes,
               categoryCode,
               locationCode,
               minQuantity,
@@ -2052,6 +2236,7 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
               specification,
               primarySupplierCode,
               secondarySupplierCode,
+              supplierCodes,
               categoryCode,
               locationCode,
               minQuantity,
@@ -2067,6 +2252,10 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
           'Access-Control-Allow-Origin': '*'
         },
       );
+    }
+
+    for (final oldPath in oldImagePaths) {
+      if (!imagePaths.contains(oldPath)) await _deleteUploadedImage(oldPath);
     }
 
     await _saveMaterialSettings(code, settings);
@@ -2093,11 +2282,19 @@ Future<Response> _updateRawMaterial(Request request, String code) async {
 Future<Response> _deleteRawMaterial(Request request, String code) async {
   try {
     final existing = await _conn.execute(
-      'SELECT image_path FROM raw_materials WHERE code = \$1',
+      'SELECT image_path, image_paths FROM raw_materials WHERE code = \$1',
       parameters: [code],
     );
-    final oldImagePath =
-        existing.isNotEmpty ? existing.first[0] as String? : null;
+    final oldImagePaths = <String>[];
+    if (existing.isNotEmpty && existing.first[1] is List) {
+      oldImagePaths.addAll(
+        (existing.first[1] as List)
+            .map((path) => path.toString())
+            .where((path) => path.isNotEmpty),
+      );
+    } else if (existing.isNotEmpty && existing.first[0] != null) {
+      oldImagePaths.add(existing.first[0].toString());
+    }
 
     final result = await _conn.execute(
       'DELETE FROM raw_materials WHERE code = \$1',
@@ -2114,7 +2311,9 @@ Future<Response> _deleteRawMaterial(Request request, String code) async {
       );
     }
 
-    await _deleteUploadedImage(oldImagePath);
+    for (final imagePath in oldImagePaths) {
+      await _deleteUploadedImage(imagePath);
+    }
 
     return Response.ok(
       jsonEncode({'success': true, 'message': 'Raw material deleted'}),
@@ -4951,7 +5150,8 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
     final orderResult = await _conn.execute(
       '''
       SELECT so.details, so.is_confirmed, so.owner_username, so.store_code,
-             COALESCE(s.name, so.store_code, 'Unknown Store')
+             COALESCE(s.name, so.store_code, 'Unknown Store'),
+             TO_CHAR(so.order_date, 'YYYY-MM-DD')
       FROM stock_orders so
       LEFT JOIN stores s ON s.code = so.store_code
       WHERE so.id = \$1 AND so.is_deleted = FALSE
@@ -5001,12 +5201,21 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
             .toList()
         : <Map<String, dynamic>>[];
     final storeName = row[4] as String? ?? 'Unknown Store';
+    final orderDate = row[5] as String? ?? '';
     final supplierGroups = <String, List<Map<String, dynamic>>>{};
     for (final item in details) {
+      final rankedSuppliers = item['supplierCodes'];
+      String? rankedFirst;
+      if (rankedSuppliers is List) {
+        for (final value in rankedSuppliers) {
+          rankedFirst = _normalizedOptionalString(value);
+          if (rankedFirst != null) break;
+        }
+      }
       final primary = _normalizedOptionalString(item['primarySupplierCode']);
       final secondary =
           _normalizedOptionalString(item['secondarySupplierCode']);
-      final supplierCode = primary ?? secondary ?? 'UNKNOWN';
+      final supplierCode = rankedFirst ?? primary ?? secondary ?? 'UNKNOWN';
       supplierGroups.putIfAbsent(supplierCode, () => []).add(item);
     }
 
@@ -5025,17 +5234,11 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
     final results = <Map<String, dynamic>>[];
     for (final entry in supplierGroups.entries) {
       final supplier = await _conn.execute(
-        'SELECT name, phone FROM suppliers WHERE code = \$1 LIMIT 1',
+        'SELECT phone FROM suppliers WHERE code = \$1 LIMIT 1',
         parameters: [entry.key],
       );
-      final supplierName = supplier.isNotEmpty
-          ? (supplier.first[0] as String? ?? entry.key)
-          : ((entry.value.first['primarySupplierName'] ??
-                  entry.value.first['secondarySupplierName'] ??
-                  entry.key)
-              .toString());
       final supplierPhone = supplier.isNotEmpty
-          ? _normalizedOptionalString(supplier.first[1])
+          ? _normalizedOptionalString(supplier.first[0])
           : null;
 
       if (sendSupplierSms && supplierPhone != null) {
@@ -5056,9 +5259,11 @@ Future<Response> _sendStockOrderSms(Request request, String id) async {
       }
 
       final reminder =
-          '$storeName 已向 $supplierName 订货 / $storeName placed an order with $supplierName. Reply STOP to opt out.';
-      for (final phone in reminderPhones) {
-        results.add(await _sendTwilioMessage(phone, reminder));
+          '$storeName：${scope.username} 于 $orderDate 订货了，请查看。';
+      if (entry.key == supplierGroups.keys.first) {
+        for (final phone in reminderPhones) {
+          results.add(await _sendTwilioMessage(phone, reminder));
+        }
       }
     }
 
@@ -5159,6 +5364,767 @@ Future<Response> _deleteStockOrder(Request request, String id) async {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       },
+    );
+  }
+}
+
+Future<Map<String, dynamic>>? _temperatureEnsureInFlight;
+
+DateTime _albertaNow() {
+  final utc = DateTime.now().toUtc();
+  final year = utc.year;
+  var marchSundays = 0;
+  late DateTime dstStart;
+  for (var day = 1; day <= 14; day++) {
+    final date = DateTime.utc(year, 3, day);
+    if (date.weekday == DateTime.sunday && ++marchSundays == 2) {
+      dstStart = DateTime.utc(year, 3, day, 9);
+      break;
+    }
+  }
+  late DateTime dstEnd;
+  for (var day = 1; day <= 7; day++) {
+    final date = DateTime.utc(year, 11, day);
+    if (date.weekday == DateTime.sunday) {
+      dstEnd = DateTime.utc(year, 11, day, 8);
+      break;
+    }
+  }
+  final isDaylight = !utc.isBefore(dstStart) && utc.isBefore(dstEnd);
+  final shifted = utc.subtract(Duration(hours: isDaylight ? 6 : 7));
+  return DateTime(
+    shifted.year,
+    shifted.month,
+    shifted.day,
+    shifted.hour,
+    shifted.minute,
+    shifted.second,
+    shifted.millisecond,
+    shifted.microsecond,
+  );
+}
+
+DateTime _dateOnly(DateTime value) =>
+    DateTime(value.year, value.month, value.day);
+
+String _temperatureDayKey(DateTime value) =>
+    '${value.year.toString().padLeft(4, '0')}-'
+    '${value.month.toString().padLeft(2, '0')}-'
+    '${value.day.toString().padLeft(2, '0')}';
+
+Set<int>? _temperatureActiveDays(dynamic value) {
+  if (value == null) return null;
+  if (value is! Iterable) return <int>{};
+  return value
+      .map((day) => day is int ? day : int.tryParse(day.toString()))
+      .whereType<int>()
+      .where((day) => day >= DateTime.monday && day <= DateTime.sunday)
+      .toSet();
+}
+
+bool _isMorningTemperatureTime(DateTime value) {
+  final minute = value.hour * 60 + value.minute;
+  return minute >= 11 * 60 + 45 && minute <= 12 * 60 + 15;
+}
+
+bool _isEveningTemperatureTime(DateTime value) {
+  final minute = value.hour * 60 + value.minute;
+  return minute >= 20 * 60 && minute <= 21 * 60;
+}
+
+double _generatedTemperature(
+  Random random,
+  String name,
+  String location,
+  double lower,
+  double upper,
+  bool morning,
+) {
+  final text = '$name $location'.toLowerCase();
+  final range = upper - lower;
+  final isDishwasher = text.contains('dish') || text.contains('洗碗');
+  final isCooling = text.contains('refriger') ||
+      text.contains('refrigertor') ||
+      text.contains('freezer') ||
+      text.contains('fridge') ||
+      text.contains('cool') ||
+      text.contains('冷') ||
+      text.contains('冰');
+  final isHeating = text.contains('insulated') ||
+      text.contains('warmer') ||
+      text.contains('heater') ||
+      text.contains('hot') ||
+      text.contains('热') ||
+      text.contains('保温');
+  double lowRatio;
+  double highRatio;
+  if (isDishwasher) {
+    lowRatio = morning ? .12 : .65;
+    highRatio = morning ? .38 : .90;
+  } else if (isCooling) {
+    lowRatio = morning ? .15 : .55;
+    highRatio = morning ? .42 : .84;
+  } else if (isHeating) {
+    lowRatio = .22;
+    highRatio = .80;
+  } else {
+    lowRatio = .20;
+    highRatio = .80;
+  }
+  final value = lower + range * (lowRatio + random.nextDouble() * (highRatio - lowRatio));
+  return double.parse(value.clamp(lower + range * .01, upper - range * .01).toStringAsFixed(1));
+}
+
+DateTime _generatedRecordTime(
+  Random random,
+  DateTime day,
+  bool morning,
+  DateTime now,
+) {
+  final startMinute = morning ? 11 * 60 + 45 : 20 * 60;
+  final endMinute = morning ? 12 * 60 + 15 : 21 * 60;
+  var availableEnd = endMinute;
+  if (_dateOnly(day) == _dateOnly(now)) {
+    availableEnd = min(endMinute, now.hour * 60 + now.minute);
+  }
+  final minute = startMinute + random.nextInt(availableEnd - startMinute + 1);
+  return DateTime(
+    day.year,
+    day.month,
+    day.day,
+    minute ~/ 60,
+    minute % 60,
+    random.nextInt(60),
+  );
+}
+
+Future<Map<String, dynamic>> _ensureTemperatureRecords() async {
+  final now = _albertaNow();
+  final today = _dateOnly(now);
+  final seedStart = DateTime(2026, 5, 1);
+  final previousResult = await _conn.execute(
+    "SELECT value FROM system_runtime_state WHERE key = 'temperature_last_home_opened_at'",
+  );
+  final previousOpen = previousResult.isEmpty
+      ? null
+      : DateTime.tryParse(previousResult.first[0]?.toString() ?? '');
+  final devices = await _conn.execute(
+    'SELECT id, name, location, lower_limit, upper_limit, active_days FROM temperature_devices ORDER BY id',
+  );
+  final restRows = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days");
+  final restDays = restRows.map((r) => r[0].toString()).toSet();
+  final random = Random();
+  final pending = <({int deviceId, double value, DateTime at})>[];
+
+  for (final device in devices) {
+    final deviceId = device[0] as int;
+    final name = device[1] as String? ?? '';
+    final location = device[2] as String? ?? '';
+    final activeDays = _temperatureActiveDays(device[5]);
+    final lower = double.parse(device[3].toString());
+    final upper = double.parse(device[4].toString());
+    final earliestResult = await _conn.execute(
+      'SELECT MIN(recorded_at) FROM temperature_records WHERE device_id = \$1',
+      parameters: [deviceId],
+    );
+    final earliestValue = earliestResult.first[0];
+    final earliest = earliestValue is DateTime
+        ? earliestValue
+        : DateTime.tryParse(earliestValue?.toString() ?? '');
+    var scanStart = previousOpen == null
+        ? seedStart
+        : _dateOnly(previousOpen).subtract(const Duration(days: 1));
+    if (earliest == null || _dateOnly(earliest).isAfter(seedStart)) {
+      scanStart = seedStart;
+    }
+    if (scanStart.isBefore(seedStart)) scanStart = seedStart;
+
+    final existingResult = await _conn.execute(
+      '''SELECT recorded_at FROM temperature_records
+         WHERE device_id = \$1 AND recorded_at >= \$2 AND recorded_at < \$3''',
+      parameters: [deviceId, scanStart, today.add(const Duration(days: 1))],
+    );
+    final slots = <String>{};
+    for (final row in existingResult) {
+      final raw = row[0];
+      final at = raw is DateTime ? raw : DateTime.tryParse(raw.toString());
+      if (at == null) continue;
+      if (_isMorningTemperatureTime(at)) {
+        slots.add('${_temperatureDayKey(at)}-morning');
+      }
+      if (_isEveningTemperatureTime(at)) {
+        slots.add('${_temperatureDayKey(at)}-evening');
+      }
+    }
+
+    for (var day = scanStart;
+        !day.isAfter(today);
+        day = day.add(const Duration(days: 1))) {
+      final dayKey = _temperatureDayKey(day);
+      if (restDays.contains(dayKey)) continue;
+      if (activeDays != null && !activeDays.contains(day.weekday)) continue;
+      final isToday = day == today;
+      final nowMinute = now.hour * 60 + now.minute;
+      // Do not synthesize a reading while its collection window is still
+      // pending. The morning slot is checked after 15:00 and the evening slot
+      // after 21:00; a later visit also backfills missed prior-day slots.
+      final morningAvailable = !isToday || nowMinute >= 15 * 60;
+      final eveningAvailable = !isToday || nowMinute >= 21 * 60;
+      if (morningAvailable && !slots.contains('$dayKey-morning')) {
+        pending.add((
+          deviceId: deviceId,
+          value: _generatedTemperature(
+            random,
+            name,
+            location,
+            lower,
+            upper,
+            true,
+          ),
+          at: _generatedRecordTime(random, day, true, now),
+        ));
+      }
+      if (eveningAvailable && !slots.contains('$dayKey-evening')) {
+        pending.add((
+          deviceId: deviceId,
+          value: _generatedTemperature(
+            random,
+            name,
+            location,
+            lower,
+            upper,
+            false,
+          ),
+          at: _generatedRecordTime(random, day, false, now),
+        ));
+      }
+    }
+  }
+
+  const chunkSize = 250;
+  for (var offset = 0; offset < pending.length; offset += chunkSize) {
+    final chunk = pending.skip(offset).take(chunkSize).toList();
+    final parameters = <dynamic>[];
+    final values = <String>[];
+    for (final record in chunk) {
+      final first = parameters.length + 1;
+      values.add('(\$$first, \$${first + 1}, \$${first + 2}, \$${first + 3})');
+      parameters.addAll([
+        record.deviceId,
+        record.value,
+        record.at,
+        null,
+      ]);
+    }
+    await _conn.execute(
+      'INSERT INTO temperature_records (device_id, temperature, recorded_at, note) VALUES ${values.join(',')}',
+      parameters: parameters,
+    );
+  }
+
+  await _conn.execute(
+    '''INSERT INTO system_runtime_state (key, value, updated_at)
+       VALUES ('temperature_last_home_opened_at', \$1, CURRENT_TIMESTAMP)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = CURRENT_TIMESTAMP''',
+    parameters: [now.toIso8601String()],
+  );
+  return {
+    'success': true,
+    'created': pending.length,
+    'deviceCount': devices.length,
+    'previousOpenedAt': previousOpen?.toIso8601String(),
+    'openedAt': now.toIso8601String(),
+  };
+}
+
+Future<Response> _ensureTemperatureRecordsOnOpen(Request request) async {
+  try {
+    final future = _temperatureEnsureInFlight ??= _ensureTemperatureRecords();
+    final result = await future;
+    return Response.ok(
+      jsonEncode(result),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } finally {
+    _temperatureEnsureInFlight = null;
+  }
+}
+
+// Temperature device and record APIs
+Future<Response> _temperatureSchedule(Request request) async {
+  final scope = await _authenticatedScope(request);
+  if (scope == null || !scope.isAdmin) return Response.forbidden('Administrator required');
+  if (request.method == 'POST') {
+    final data = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    if (data.containsKey('deviceId')) {
+      final days = data['days'];
+      if (days != null && (days is! List || days.any((d) => d is! int || d < 1 || d > 7))) {
+        return Response.badRequest(body: 'Invalid weekdays');
+      }
+      await _conn.execute('UPDATE temperature_devices SET active_days = \$1 WHERE id = \$2', parameters: [days == null ? null : List<int>.from(days), data['deviceId']]);
+    } else {
+      final day = DateTime.tryParse(data['day']?.toString() ?? '');
+      if (day == null) return Response.badRequest(body: 'Invalid date');
+      await _conn.execute(data['remove'] == true ? 'DELETE FROM temperature_rest_days WHERE day = \$1' : 'INSERT INTO temperature_rest_days (day) VALUES (\$1) ON CONFLICT DO NOTHING', parameters: [day]);
+    }
+  }
+  final rests = await _conn.execute("SELECT TO_CHAR(day, 'YYYY-MM-DD') FROM temperature_rest_days ORDER BY day DESC");
+  final devices = await _conn.execute('SELECT id, active_days FROM temperature_devices');
+  return Response.ok(jsonEncode({'days': rests.map((r) => r[0]).toList(), 'devices': devices.map((r) => {'id': r[0], 'days': r[1]}).toList()}), headers: {'Content-Type': 'application/json'});
+}
+
+Future<Response> _addTemperatureDevice(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final name = _normalizedOptionalString(json['name']);
+    final location = _normalizedOptionalString(json['location']);
+    final upperLimit = (json['upperLimit'] as num?)?.toDouble();
+    final lowerLimit = (json['lowerLimit'] as num?)?.toDouble();
+    final imagePath = _normalizedOptionalString(json['imagePath']);
+    if (name == null || location == null || upperLimit == null || lowerLimit == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    if (lowerLimit >= upperLimit) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'lowerLimit must be below upperLimit'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''
+      INSERT INTO temperature_devices (name, location, upper_limit, lower_limit, image_path)
+      VALUES (\$1, \$2, \$3, \$4, \$5)
+      RETURNING id
+      ''',
+      parameters: [name, location, upperLimit, lowerLimit, imagePath],
+    );
+    return Response.ok(
+      jsonEncode({'success': true, 'id': result.first[0]}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _getTemperatureDevices(Request request) async {
+  try {
+    final result = await _conn.execute('''
+      SELECT d.id, d.name, d.location, d.upper_limit, d.lower_limit,
+             d.image_path, latest.temperature,
+             TO_CHAR(latest.recorded_at, 'YYYY-MM-DD HH24:MI:SS')
+      FROM temperature_devices d
+      LEFT JOIN LATERAL (
+        SELECT temperature, recorded_at
+        FROM temperature_records
+        WHERE device_id = d.id
+        ORDER BY recorded_at DESC, id DESC
+        LIMIT 1
+      ) latest ON TRUE
+      ORDER BY d.name ASC, d.id ASC
+    ''');
+    final devices = result.map((row) => {
+      'id': row[0],
+      'name': row[1],
+      'location': row[2],
+      'upperLimit': double.tryParse(row[3].toString()),
+      'lowerLimit': double.tryParse(row[4].toString()),
+      'imagePath': row[5],
+      'imageUrl': _imageUrlFromPath(row[5] as String?),
+      'latestTemperature': row[6] == null ? null : double.tryParse(row[6].toString()),
+      'latestRecordedAt': row[7],
+    }).toList();
+    return Response.ok(
+      jsonEncode({'devices': devices}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _updateTemperatureDevice(Request request, String id) async {
+  try {
+    final deviceId = int.tryParse(id);
+    if (deviceId == null) return Response.badRequest(body: 'Invalid id');
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final name = _normalizedOptionalString(json['name']);
+    final location = _normalizedOptionalString(json['location']);
+    final upperLimit = (json['upperLimit'] as num?)?.toDouble();
+    final lowerLimit = (json['lowerLimit'] as num?)?.toDouble();
+    if (name == null || location == null || upperLimit == null || lowerLimit == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    if (lowerLimit >= upperLimit) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'lowerLimit must be below upperLimit'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final existing = await _conn.execute(
+      'SELECT image_path FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (existing.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final hasImagePath = json.containsKey('imagePath');
+    final imagePath = _normalizedOptionalString(json['imagePath']);
+    final result = await _conn.execute(
+      hasImagePath
+          ? '''UPDATE temperature_devices
+               SET name = \$1, location = \$2, upper_limit = \$3, lower_limit = \$4, image_path = \$5
+               WHERE id = \$6'''
+          : '''UPDATE temperature_devices
+               SET name = \$1, location = \$2, upper_limit = \$3, lower_limit = \$4
+               WHERE id = \$5''',
+      parameters: hasImagePath
+          ? [name, location, upperLimit, lowerLimit, imagePath, deviceId]
+          : [name, location, upperLimit, lowerLimit, deviceId],
+    );
+    if (hasImagePath) {
+      final oldImagePath = existing.first[0] as String?;
+      if (oldImagePath != null && oldImagePath != imagePath) {
+        await _deleteUploadedImage(oldImagePath);
+      }
+    }
+    return Response.ok(
+      jsonEncode({'success': result.affectedRows > 0}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _deleteTemperatureDevice(Request request, String id) async {
+  try {
+    final deviceId = int.tryParse(id);
+    if (deviceId == null) return Response.badRequest(body: 'Invalid id');
+    final existing = await _conn.execute(
+      'SELECT image_path FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (existing.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    await _conn.execute(
+      'DELETE FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    await _deleteUploadedImage(existing.first[0] as String?);
+    return Response.ok(
+      jsonEncode({'success': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _publicTemperatureEntryPage(Request request, String id) async {
+  try {
+  final deviceId = int.tryParse(id);
+  if (deviceId == null) {
+    return Response.notFound('Temperature device not found');
+  }
+  final result = await _conn.execute(
+    '''SELECT name, location, lower_limit, upper_limit, image_path
+       FROM temperature_devices WHERE id = \$1''',
+    parameters: [deviceId],
+  );
+  if (result.isEmpty) {
+    return Response.notFound(
+      '<h1>设备不存在 / Device not found</h1>',
+      headers: {'Content-Type': 'text/html; charset=utf-8'},
+    );
+  }
+  const escape = HtmlEscape(HtmlEscapeMode.element);
+  final name = escape.convert(result.first[0]?.toString() ?? '');
+  final location = escape.convert(result.first[1]?.toString() ?? '');
+  final lower = double.parse(result.first[2].toString());
+  final upper = double.parse(result.first[3].toString());
+  final photo = _imageUrlFromPath(result.first[4] as String?);
+  final photoHtml = photo == null ? '' : '<img src="${const HtmlEscape().convert(photo)}" alt="设备照片 / Device photo" style="width:100%;max-height:280px;object-fit:contain;border-radius:12px">';
+  final html = '''<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>温度记录 / Temperature Entry</title>
+  <style>
+    *{box-sizing:border-box}body{margin:0;background:#f1f5f9;color:#172033;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","Noto Sans SC",sans-serif}
+    .wrap{max-width:620px;margin:0 auto;padding:20px}.card{background:white;border-radius:18px;padding:24px;box-shadow:0 10px 30px rgba(15,23,42,.1)}
+    h1{margin:0 0 20px;font-size:25px}.info{display:grid;grid-template-columns:1fr;gap:10px;background:#f8fafc;border-radius:12px;padding:16px;margin-bottom:20px}
+    .label{font-size:13px;color:#64748b}.value{font-size:17px;font-weight:650}.field{margin-top:18px}label{display:block;font-weight:650;margin-bottom:7px}
+    input,textarea{width:100%;font-size:20px;border:2px solid #cbd5e1;border-radius:12px;padding:13px;background:white;outline:none}textarea{font-size:16px;min-height:100px;resize:vertical}
+    input:focus,textarea:focus{border-color:#2563eb}.status{display:none;margin-top:12px;padding:13px;border-radius:10px;font-weight:700}.ok{display:block;background:#dcfce7;color:#166534}.bad{display:block;background:#fee2e2;color:#991b1b}
+    .hidden{display:none}.required{color:#dc2626}button{width:100%;margin-top:20px;border:0;border-radius:12px;padding:14px;background:#2563eb;color:white;font-size:17px;font-weight:700;cursor:pointer}button:disabled{opacity:.55}
+    .message{margin-top:14px;text-align:center;font-weight:650}.success{color:#15803d}.error{color:#b91c1c}
+  </style>
+</head>
+<body><main class="wrap"><section class="card">
+  <h1>设备温度记录<br><small>Device Temperature Entry</small></h1>
+  $photoHtml
+  <div class="info">
+    <div><div class="label">设备名称 / Device name</div><div class="value">$name</div></div>
+    <div><div class="label">设备位置 / Location</div><div class="value">$location</div></div>
+    <div><div class="label">扫码时间 / Scan time</div><div class="value" id="scanTime"></div></div>
+    <div><div class="label">温度上下限 / Temperature limits</div><div class="value">${lower.toStringAsFixed(1)} °C ～ ${upper.toStringAsFixed(1)} °C</div></div>
+  </div>
+  <form id="entryForm" novalidate>
+    <div class="field"><label for="temperature">当前温度 / Current temperature (°C)</label>
+      <input id="temperature" type="text" inputmode="decimal" autocomplete="off" placeholder="例如 / Example: 2.5 or -19.2" required>
+      <div id="status" class="status"></div>
+    </div>
+    <div id="noteField" class="field hidden"><label for="note">备注（整改措施）/ Corrective action <span class="required">*</span></label>
+      <textarea id="note" placeholder="请填写整改措施 / Corrective action is required"></textarea>
+    </div>
+    <button id="submitButton" type="submit">提交温度 / Submit Temperature</button>
+    <div id="message" class="message"></div>
+  </form>
+</section></main>
+<script>
+  const deviceId=$deviceId, lower=$lower, upper=$upper;
+  const input=document.getElementById('temperature'), statusBox=document.getElementById('status');
+  const noteField=document.getElementById('noteField'), note=document.getElementById('note');
+  document.getElementById('scanTime').textContent=new Intl.DateTimeFormat('zh-CN',{dateStyle:'medium',timeStyle:'medium'}).format(new Date());
+  function sanitize(value){
+    let clean=value.replace(/[^0-9.\\-]/g,'');
+    clean=clean.replace(/(?!^)-/g,'');
+    const firstDot=clean.indexOf('.');
+    if(firstDot>=0) clean=clean.slice(0,firstDot+1)+clean.slice(firstDot+1).replace(/\\./g,'');
+    return clean;
+  }
+  function updateState(){
+    input.value=sanitize(input.value);
+    if(!/^-?(?:\\d+\\.?\\d*|\\.\\d+)\$/.test(input.value)){statusBox.className='status';noteField.className='field hidden';return null;}
+    const value=Number(input.value), outside=value<lower||value>upper;
+    statusBox.textContent=outside?'温度超出范围 / Out of range':'温度正常 / Within range';
+    statusBox.className='status '+(outside?'bad':'ok');
+    noteField.className=outside?'field':'field hidden';
+    note.required=outside;
+    return {value:value,outside:outside};
+  }
+  input.addEventListener('input',updateState);
+  document.getElementById('entryForm').addEventListener('submit',async function(event){
+    event.preventDefault();const state=updateState(),message=document.getElementById('message'),button=document.getElementById('submitButton');
+    if(!state){message.className='message error';message.textContent='请输入正确的数字 / Enter a valid number';return;}
+    if(state.outside&&!note.value.trim()){message.className='message error';message.textContent='超限时必须填写整改措施 / Corrective action is required';note.focus();return;}
+    button.disabled=true;message.textContent='';
+    try{
+      const response=await fetch('/api/public/temperature-records',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({deviceId:deviceId,temperature:state.value,note:note.value.trim()})});
+      const data=await response.json();if(!response.ok)throw new Error(data.error||'Submit failed');
+      message.className='message success';message.textContent='提交成功 / Submitted successfully';input.value='';note.value='';statusBox.className='status';noteField.className='field hidden';
+    }catch(error){message.className='message error';message.textContent='提交失败 / Failed: '+error.message;}finally{button.disabled=false;}
+  });
+</script></body></html>''';
+  return Response.ok(
+    html,
+    headers: {
+      'Content-Type': 'text/html; charset=utf-8',
+      'Cache-Control': 'no-store',
+    },
+  );
+  } catch (e, st) {
+    print('Public temperature page error: $e\n$st');
+    return Response.internalServerError(
+      body: '页面加载失败 / Page failed to load: $e',
+      headers: {'Content-Type': 'text/plain; charset=utf-8'},
+    );
+  }
+}
+
+Future<Response> _addPublicTemperatureRecord(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final deviceId = (json['deviceId'] as num?)?.toInt();
+    final temperature = (json['temperature'] as num?)?.toDouble();
+    final note = _normalizedOptionalString(json['note']);
+    if (deviceId == null || temperature == null || !temperature.isFinite) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid device or temperature'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final device = await _conn.execute(
+      'SELECT lower_limit, upper_limit FROM temperature_devices WHERE id = \$1',
+      parameters: [deviceId],
+    );
+    if (device.isEmpty) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature device not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final lower = double.parse(device.first[0].toString());
+    final upper = double.parse(device.first[1].toString());
+    final outside = temperature < lower || temperature > upper;
+    if (outside && note == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Corrective action is required'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''INSERT INTO temperature_records (device_id, temperature, recorded_at, note)
+         VALUES (\$1, \$2, \$3, \$4) RETURNING id''',
+      parameters: [deviceId, temperature, _albertaNow(), note],
+    );
+    return Response.ok(
+      jsonEncode({
+        'success': true,
+        'id': result.first[0],
+        'outOfRange': outside,
+      }),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _addTemperatureRecord(Request request) async {
+  try {
+    final json = jsonDecode(await request.readAsString()) as Map<String, dynamic>;
+    final deviceId = (json['deviceId'] as num?)?.toInt();
+    final temperature = (json['temperature'] as num?)?.toDouble();
+    final recordedAtText = _normalizedOptionalString(json['recordedAt']);
+    final note = _normalizedOptionalString(json['note']);
+    if (deviceId == null || temperature == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing required fields'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final recordedAt = recordedAtText == null
+        ? DateTime.now()
+        : DateTime.tryParse(recordedAtText);
+    if (recordedAt == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Invalid recordedAt'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final result = await _conn.execute(
+      '''INSERT INTO temperature_records (device_id, temperature, recorded_at, note)
+         VALUES (\$1, \$2, \$3, \$4) RETURNING id''',
+      parameters: [deviceId, temperature, recordedAt, note],
+    );
+    return Response.ok(
+      jsonEncode({'success': true, 'id': result.first[0]}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _getTemperatureRecords(Request request) async {
+  try {
+    final query = request.requestedUri.queryParameters;
+    final deviceId = int.tryParse(query['deviceId'] ?? '');
+    if (deviceId == null) {
+      return Response.badRequest(
+        body: jsonEncode({'error': 'Missing or invalid deviceId'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    final from = DateTime.tryParse(query['from'] ?? '');
+    final to = DateTime.tryParse(query['to'] ?? '');
+    final sql = StringBuffer('''
+      SELECT id, device_id, temperature,
+             TO_CHAR(recorded_at, 'YYYY-MM-DD HH24:MI:SS'), note
+      FROM temperature_records
+      WHERE device_id = \$1
+    ''');
+    final parameters = <dynamic>[deviceId];
+    if (from != null) {
+      sql.write(' AND recorded_at >= \$${parameters.length + 1}');
+      parameters.add(from);
+    }
+    if (to != null) {
+      sql.write(' AND recorded_at < \$${parameters.length + 1}');
+      parameters.add(to);
+    }
+    sql.write(' ORDER BY recorded_at ASC, id ASC');
+    final result = await _conn.execute(sql.toString(), parameters: parameters);
+    final records = result.map((row) => {
+      'id': row[0],
+      'deviceId': row[1],
+      'temperature': double.tryParse(row[2].toString()),
+      'recordedAt': row[3],
+      'note': row[4],
+    }).toList();
+    return Response.ok(
+      jsonEncode({'records': records}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  }
+}
+
+Future<Response> _deleteTemperatureRecord(Request request, String id) async {
+  try {
+    final recordId = int.tryParse(id);
+    if (recordId == null) return Response.badRequest(body: 'Invalid id');
+    final result = await _conn.execute(
+      'DELETE FROM temperature_records WHERE id = \$1',
+      parameters: [recordId],
+    );
+    if (result.affectedRows == 0) {
+      return Response.notFound(
+        jsonEncode({'error': 'Temperature record not found'}),
+        headers: {'Content-Type': 'application/json'},
+      );
+    }
+    return Response.ok(
+      jsonEncode({'success': true}),
+      headers: {'Content-Type': 'application/json'},
+    );
+  } catch (e) {
+    return Response.internalServerError(
+      body: jsonEncode({'error': e.toString()}),
+      headers: {'Content-Type': 'application/json'},
     );
   }
 }
@@ -6067,7 +7033,9 @@ void main() async {
     final webHandler = _createWebHandler();
     FutureOr<Response> handler(Request request) {
       final path = request.url.path;
-      if (path.startsWith('api/') || path.startsWith('uploads/')) {
+      if (path.startsWith('api/') ||
+          path.startsWith('uploads/') ||
+          path.startsWith('temperature-entry/')) {
         return apiHandler(request);
       }
       return webHandler(request);

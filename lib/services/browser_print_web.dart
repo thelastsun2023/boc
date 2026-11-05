@@ -83,7 +83,7 @@ Future<bool> printHtmlDocument({
   </head>
   <body onload="startPrint()">
     <div class="print-toolbar">
-      <div>原材料打印预览</div>
+      <div>$title · 打印预览</div>
       <button onclick="startPrint()">打印</button>
     </div>
     <div class="print-container">

@@ -135,6 +135,36 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
     );
   }
 
+  List<String> _supplierCodes(Map<String, dynamic> item) {
+    final saved = item['supplierCodes'];
+    final codes = <String>[];
+    if (saved is List) {
+      for (final value in saved) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !codes.contains(code)) codes.add(code);
+      }
+    }
+    if (codes.isEmpty) {
+      for (final value in [
+        item['primarySupplierCode'],
+        item['secondarySupplierCode'],
+      ]) {
+        final code = value?.toString().trim() ?? '';
+        if (code.isNotEmpty && !codes.contains(code)) codes.add(code);
+      }
+    }
+    return codes;
+  }
+
+  String _supplierListText(Map<String, dynamic> item) {
+    final codes = _supplierCodes(item);
+    if (codes.isEmpty) return '-';
+    return [
+      for (var index = 0; index < codes.length; index++)
+        '${index + 1}. ${_supplierName(codes[index])}',
+    ].join('\n');
+  }
+
   List<Map<String, dynamic>> get _categoryOptions {
     final counts = <String, int>{};
     for (final item in _rawMaterials) {
@@ -179,8 +209,7 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
     DataColumn(label: Text('名称')),
     DataColumn(label: Text('规格')),
     DataColumn(label: Text('最小订货量')),
-    DataColumn(label: Text('主要供货商')),
-    DataColumn(label: Text('次要供货商')),
+    DataColumn(label: Text('供应商顺序')),
   ];
 
   List<DataRow> _buildRows(List<Map<String, dynamic>> items) {
@@ -191,28 +220,30 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
       final displayName = _orderedName(nameCN, nameEN);
       final spec = _displayString(item['specification']);
       final minQuantity = _displayString(item['minQuantity']);
-      final primarySupplier = _supplierName(
-        item['primarySupplierCode'] as String?,
-      );
-      final secondarySupplier = _supplierName(
-        item['secondarySupplierCode'] as String?,
-      );
+      final suppliers = _supplierListText(item);
+      final imagePaths = <String>[
+        for (final value in item['imagePaths'] as List? ?? [])
+          if (value?.toString().trim().isNotEmpty == true)
+            value.toString().trim(),
+      ];
+      if (imagePaths.isEmpty && item['imageUrl'] != null) {
+        imagePaths.add(item['imageUrl'].toString());
+      }
       return DataRow(
         cells: [
           DataCell(
-            ProductImage(
-              url: item['imageUrl'] as String?,
+            ProductImageGallery(
+              paths: imagePaths,
               title: displayName,
-              width: 44,
-              height: 44,
+              width: 144,
+              imageSize: 44,
             ),
           ),
           DataCell(Text(code)),
           DataCell(Text(displayName)),
           DataCell(Text(spec)),
           DataCell(Text(minQuantity)),
-          DataCell(Text(primarySupplier)),
-          DataCell(Text(secondarySupplier)),
+          DataCell(Text(suppliers)),
         ],
       );
     }).toList();
@@ -308,7 +339,7 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
         '</div>',
       );
       buffer.write('<table><thead><tr>');
-      for (final header in ['编号', '名称', '规格', '最小订货量', '主要供货商', '次要供货商']) {
+      for (final header in ['编号', '名称', '规格', '最小订货量', '供应商顺序']) {
         buffer.write('<th>${_escapeHtml(header)}</th>');
       }
       buffer.write('</tr></thead><tbody>');
@@ -320,23 +351,15 @@ class _RawMaterialOverviewPageState extends State<RawMaterialOverviewPage> {
         final displayName = _orderedName(nameCN, nameEN);
         final spec = _displayString(item['specification']);
         final minQuantity = _displayString(item['minQuantity']);
-        final primarySupplier = _supplierName(
-          item['primarySupplierCode'] as String?,
-        );
-        final secondarySupplier = _supplierName(
-          item['secondarySupplierCode'] as String?,
-        );
+        final supplierHtml = [
+          for (final entry in _supplierCodes(item).asMap().entries)
+            '${entry.key + 1}. ${_escapeHtml(_supplierName(entry.value))}',
+        ].join('<br>');
         buffer.write('<tr>');
-        for (final cell in [
-          code,
-          displayName,
-          spec,
-          minQuantity,
-          primarySupplier,
-          secondarySupplier,
-        ]) {
+        for (final cell in [code, displayName, spec, minQuantity]) {
           buffer.write('<td>${_escapeHtml(cell)}</td>');
         }
+        buffer.write('<td>${supplierHtml.isEmpty ? '-' : supplierHtml}</td>');
         buffer.write('</tr>');
       }
 
