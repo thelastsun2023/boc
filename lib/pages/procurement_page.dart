@@ -442,9 +442,18 @@ class _ProcurementItemState extends State<_ProcurementItem> {
         ? Colors.yellow.shade600
         : Colors.green.shade700;
     final foreground = insufficient ? Colors.black87 : Colors.white;
+    final rowColor = !purchased
+        ? Colors.red.shade100
+        : insufficient
+        ? Colors.yellow.shade200
+        : Colors.green.shade100;
     return Container(
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xffeeeeee))),
+      decoration: BoxDecoration(
+        color: rowColor,
+        border: Border(
+          top: const BorderSide(color: Color(0xffeeeeee)),
+          left: BorderSide(color: statusColor, width: 5),
+        ),
       ),
       padding: const EdgeInsets.all(12),
       child: Row(
