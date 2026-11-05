@@ -8,6 +8,34 @@ String _number(dynamic value) {
   return n == n.roundToDouble() ? n.toInt().toString() : n.toStringAsFixed(2);
 }
 
+({String label, Color color, Color foreground, int pending, int insufficient})
+_purchaseSummary(List<dynamic> items) {
+  final pending = items.where((item) => item['purchased'] != true).length;
+  final insufficient = items
+      .where(
+        (item) =>
+            item['purchased'] == true &&
+            (item['purchaseQuantity'] as num) < (item['demandQuantity'] as num),
+      )
+      .length;
+  final incomplete = pending > 0 || items.isEmpty;
+  return (
+    label: incomplete
+        ? '未采购'
+        : insufficient > 0
+        ? '采购不足'
+        : '已采购',
+    color: incomplete
+        ? Colors.red.shade700
+        : insufficient > 0
+        ? Colors.yellow.shade600
+        : Colors.green.shade700,
+    foreground: !incomplete && insufficient > 0 ? Colors.black87 : Colors.white,
+    pending: pending,
+    insufficient: insufficient,
+  );
+}
+
 class ProcurementPage extends StatefulWidget {
   const ProcurementPage({super.key});
   @override
@@ -119,7 +147,7 @@ class _ProcurementPageState extends State<ProcurementPage> {
           '''
       <style>body{font-family:Arial,sans-serif;padding:24px}table{width:100%;border-collapse:collapse}td,th{border:1px solid #aaa;padding:8px;text-align:left}</style>
       <h1>每日采购单</h1><p>${e(order['date'])} · ${e(order['storeName'])} (${e(order['storeCode'])})</p>
-      <p>整单状态：${order['purchased'] == true ? '已采购' : '未采购'}；以下为当前筛选项目。</p>
+      <p>整单状态：${_purchaseSummary(order['items'] as List).label}；以下为当前筛选项目。</p>
       <table><tr><th>商品 / Product</th><th>采购单位（供应商）</th><th>规格</th><th>需求数量</th><th>采购数量</th><th>状态</th></tr>$rows</table>''',
     );
     if (!success && mounted) {
@@ -278,19 +306,59 @@ class _ProcurementPageState extends State<ProcurementPage> {
                     itemBuilder: (context, index) {
                       final order = visible[index],
                           lines = _lines(visible[index]);
+                      final summary = _purchaseSummary(order['items'] as List);
                       return Card(
+                        clipBehavior: Clip.antiAlias,
                         margin: const EdgeInsets.only(bottom: 12),
                         child: ExpansionTile(
                           key: PageStorageKey(
                             'procurement-${order['storeCode']}-${order['date']}',
                           ),
                           initiallyExpanded: index == 0,
-                          title: Text(
-                            '${order['date']} · ${order['storeName']}',
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          backgroundColor: summary.color.withValues(alpha: .08),
+                          collapsedBackgroundColor: summary.color.withValues(
+                            alpha: .08,
+                          ),
+                          title: Wrap(
+                            spacing: 12,
+                            runSpacing: 6,
+                            crossAxisAlignment: WrapCrossAlignment.center,
+                            children: [
+                              Text(
+                                '${order['date']} · ${order['storeName']}',
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              Tooltip(
+                                message:
+                                    '整单全部项目：${summary.pending} 项未采购，${summary.insufficient} 项采购不足',
+                                child: Container(
+                                  key: ValueKey(
+                                    'purchase-summary-${order['storeCode']}-${order['date']}',
+                                  ),
+                                  padding: const EdgeInsets.symmetric(
+                                    horizontal: 10,
+                                    vertical: 5,
+                                  ),
+                                  decoration: BoxDecoration(
+                                    color: summary.color,
+                                    borderRadius: BorderRadius.circular(16),
+                                  ),
+                                  child: Text(
+                                    summary.label,
+                                    style: TextStyle(
+                                      color: summary.foreground,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                              ),
+                            ],
                           ),
                           subtitle: Text(
-                            '${order['purchased'] == true ? '已采购' : '未采购'}  ·  ${order['purchasedCount']} / ${(order['items'] as List).length} 项已采购  ·  当前显示 ${lines.length} 项',
+                            '${summary.label}  ·  ${order['purchasedCount']} / ${(order['items'] as List).length} 项已采购  ·  当前显示 ${lines.length} 项',
                           ),
                           children: [
                             Align(

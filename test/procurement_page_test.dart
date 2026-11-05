@@ -16,6 +16,16 @@ void main() {
     addTearDown(tester.view.resetDevicePixelRatio);
     SessionService().token = 'test-session';
     addTearDown(SessionService().clear);
+    Color? summaryColor() =>
+        (tester
+                    .widget<Container>(
+                      find.byKey(
+                        const ValueKey('purchase-summary-S001-2026-10-16'),
+                      ),
+                    )
+                    .decoration
+                as BoxDecoration)
+            .color;
     final lines = [
       for (var i = 0; i < 2; i++)
         <String, dynamic>{
@@ -70,6 +80,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Product 0'), findsOneWidget);
       expect(find.text('Product 1'), findsOneWidget);
+      expect(summaryColor(), Colors.red.shade700);
       expect(
         tester
             .widget<ActionChip>(find.byType(ActionChip).first)
@@ -94,9 +105,11 @@ void main() {
         Colors.green.shade700,
       );
       expect(find.textContaining('未采购  ·  1 / 2'), findsOneWidget);
+      expect(summaryColor(), Colors.red.shade700);
       await tester.tap(find.widgetWithText(ActionChip, '未采购'));
       await tester.pumpAndSettle();
       expect(find.textContaining('已采购  ·  2 / 2'), findsOneWidget);
+      expect(summaryColor(), Colors.green.shade700);
       expect(
         tester.widget<ActionChip>(find.byType(ActionChip).last).backgroundColor,
         Colors.green.shade700,
@@ -110,6 +123,7 @@ void main() {
             .backgroundColor,
         Colors.yellow.shade600,
       );
+      expect(summaryColor(), Colors.yellow.shade600);
       await tester.tap(find.widgetWithText(ActionChip, '采购不足'));
       await tester.pumpAndSettle();
       expect(
@@ -134,7 +148,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('Product 0'), findsNothing);
       expect(find.text('Product 1'), findsOneWidget);
-      expect(find.textContaining('已采购  ·  2 / 2'), findsOneWidget);
+      expect(find.textContaining('采购不足  ·  2 / 2'), findsOneWidget);
+      expect(summaryColor(), Colors.yellow.shade600);
       expect(tester.takeException(), isNull);
     }, () => client);
   });
@@ -230,6 +245,10 @@ void main() {
         await tester.tap(find.text('2026-10-16 · Store One'));
         await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const ValueKey('purchase-summary-S001-2026-10-16')),
+          findsOneWidget,
+        );
       }
       expect(find.text('Product'), findsOneWidget);
     }, () => client);
